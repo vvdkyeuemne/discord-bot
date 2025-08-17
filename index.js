@@ -2163,45 +2163,30 @@ const embed = new EmbedBuilder()
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
 // ===== GỬI KẾT QUẢ =====
-const imageUrls = Array.isArray(v.images)
-  ? v.images
-      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
-      .filter(Boolean)
-  : [];
+// 1) Gửi embed trước
+await interaction.editReply({ embeds: [embed] });
 
-// 1) Nếu là BÀI ẢNH: gửi tối đa 10 ảnh + embed (ảnh đầu làm preview)
-if (imageUrls.length) {
-  await interaction.editReply({
-    embeds: [ embed.setImage(imageUrls[0] || null) ],
-    files: imageUrls.slice(0, 10).map((url, i) => ({
-      attachment: url,
-      name: `tiktok_${i + 1}.jpg`
-    }))
-  });
-  return;
-}
-
-// 2) Nếu là VIDEO: ưu tiên gửi file (đẹp), lỗi thì fallback sang URL
+// 2) Nếu là VIDEO: gửi file ở tin nhắn tiếp theo; lỗi thì fallback URL
 if (videoUrl) {
   try {
-    await interaction.editReply({
-      embeds: [embed],
+    await interaction.followUp({
       files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }]
     });
   } catch (err) {
-    console.warn('Send file failed, fallback to URL:', err?.message);
-    await interaction.editReply({
-      embeds: [embed],
-      content: videoUrl
-    });
+    console.warn('Send file failed, fallback URL:', err?.message);
+    await interaction.followUp({ content: videoUrl });
   }
   return;
 }
 
-// 3) Không có gì để gửi
-await interaction.editReply({
-  content: '❌ Không tìm thấy video/ảnh để tải.'
-});
+// 3) Nếu là BÀI ẢNH: chỉ để ảnh trong embed (không attach file để tránh trùng)
+if (imageUrls.length) {
+  // đã setImage(imageUrls[0]) ở embed rồi -> không gửi files nữa
+  return;
+}
+
+// 4) Không có gì để gửi:
+await interaction.followUp({ content: '❌ Không tìm thấy video/ảnh để tải.' });
     
     return;
   } catch (err) {

@@ -2222,7 +2222,7 @@ if (videoUrl) {
 // 5) Không có gì để gửi
 await interaction.editReply({
   content: '❌ Không tìm thấy video/ảnh để tải.',
-}):
+});
    
     return;
   } catch (err) {

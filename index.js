@@ -2162,8 +2162,26 @@ const embed = new EmbedBuilder()
   .setFooter({ text: 'Nguồn: TikTok' })
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
-// Gửi kết quả:
-// 1) Nếu là video: đính kèm file (đẹp, không in URL dài)
+// ===== GỬI KẾT QUẢ =====
+const imageUrls = Array.isArray(v.images)
+  ? v.images
+      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
+      .filter(Boolean)
+  : [];
+
+// 1) Nếu là BÀI ẢNH: gửi tối đa 10 ảnh + embed (ảnh đầu làm preview)
+if (imageUrls.length) {
+  await interaction.editReply({
+    embeds: [ embed.setImage(imageUrls[0] || null) ],
+    files: imageUrls.slice(0, 10).map((url, i) => ({
+      attachment: url,
+      name: `tiktok_${i + 1}.jpg`
+    }))
+  });
+  return;
+}
+
+// 2) Nếu là VIDEO: ưu tiên gửi file (đẹp), lỗi thì fallback sang URL
 if (videoUrl) {
   try {
     await interaction.editReply({
@@ -2171,7 +2189,6 @@ if (videoUrl) {
       files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }]
     });
   } catch (err) {
-    // fallback khi file quá lớn/host chặn => gửi link
     console.warn('Send file failed, fallback to URL:', err?.message);
     await interaction.editReply({
       embeds: [embed],
@@ -2181,18 +2198,7 @@ if (videoUrl) {
   return;
 }
 
-// 2) Nếu là bài ảnh: gửi tối đa 10 ảnh kèm embed
-if (images.length) {
-  await interaction.editReply({
-    embeds: [embed.setImage(images[0] || null)],
-    files: images.slice(0, 10).map((url, i) => ({
-      attachment: url,
-      name: `tiktok_${i + 1}.jpg`
-    }))
-  });
-  return;
-}
-
+// 3) Không có gì để gửi
 await interaction.editReply({
   content: '❌ Không tìm thấy video/ảnh để tải.'
 });

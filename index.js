@@ -2205,6 +2205,9 @@ if (videoUrl) {
       console.warn('Attach mp4 failed, fallback to URL:', err?.message);
     }
   }
+  // nếu không chắc là mp4 (HLS, webm, ...) hoặc attach thất bại -> chỉ gửi embed, không in URL
+await interaction.followUp({ content: "⚠️ Không gửi được file video." });
+return;
 }
 
 // 5) Không có gì để gửi

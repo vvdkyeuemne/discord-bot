@@ -2161,20 +2161,21 @@ const imageUrls = Array.isArray(v.images)
 const isImagePost = imageUrls.length > 0;
 
 // Chỉ tìm link video khi KHÔNG phải bài ảnh
-let dlVideoUrl = null;
+let videoUrl = null;
 if (!isImagePost) {
-  const candidates = [
-    v.video?.nowatermark,
-    v.video?.no_watermark,
-    v.video?.nowatermark, // phòng API khác tên
-    v.noWatermark,
-    v.hdplay,
-    v.play,
-    v.wmplay,
-  ].filter(Boolean);
+    const candidates = [
+        v.video?.nowatermark,
+        v.video?.no_watermark,
+        v.video2?.nowatermark,
+        v.video2?.no_watermark, // phòng API khác tên
+        v.nwmplay,
+        v.hdplay,
+        v.play,
+        v.wmplay,
+    ].filter(Boolean);
 
-  // Ưu tiên link thực sự là mp4/mov
-  dlVideoUrl = candidates.find(u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) || null;
+    // Ưu tiên link thực sự là mp4/mov
+    videoUrl = candidates.find(u => /^https?:\/\/./.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) || null;
 }
 
 // 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng thumbnail cho embed (tránh bị “2 ảnh”)

@@ -2150,13 +2150,37 @@ const embed = new EmbedBuilder()
   .setFooter({ text: 'Nguồn: TikTok' })
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
-// ===== GỬI KẾT QUẢ: EMBED TRƯỚC, FILE SAU =====
+// ======= GỬI KẾT QUẢ: EMBED TRƯỚC, FILE SAU =======
 
-// 0) Gửi EMBED trước
+// 1) Chuẩn bị dữ liệu media
+const imageUrls = Array.isArray(v.images)
+  ? v.images
+      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
+      .filter(Boolean)
+  : [];
+
+const isImagePost = imageUrls.length > 0;
+
+let videoUrl = null;
+if (!isImagePost) {
+  const candidates = [
+    v.video?.noWatermark,
+    v.video?.no_watermark,
+    v.video?.nowatermark,
+    v.noWatermark,
+    v.hdplay,
+    v.play,
+    v.wmplay,
+  ].filter(Boolean);
+  videoUrl = candidates.find(u => /^https?:\/\//.test(u)) || null;
+}
+
+// 2) Gửi EMBED trước (không setImage để tránh trùng ảnh)
+// (embed đã build ở trên)
 await interaction.editReply({ embeds: [embed] });
 
-// 1) Nếu là BÀI ẢNH: followUp gửi tối đa 10 ảnh (không dùng setImage để tránh hiện 2 ảnh)
-if (isImagePost && imageUrls.length) {
+// 3) Nếu là BÀI ẢNH: theo sau bằng attach tối đa 10 ảnh
+if (isImagePost) {
   await interaction.followUp({
     files: imageUrls.slice(0, 10).map((url, i) => ({
       attachment: url,
@@ -2166,11 +2190,10 @@ if (isImagePost && imageUrls.length) {
   return;
 }
 
-// 2) Nếu là VIDEO: ưu tiên mp4 -> attach file; nếu không thì gửi URL
+// 4) Nếu là VIDEO: ưu tiên attach file mp4, lỗi thì gửi URL
 if (videoUrl) {
   const looksLikeMp4 =
-    /\.(mp4|mov)(\?|$)/i.test(videoUrl) ||
-    /mime_type=video_mp4/i.test(videoUrl);
+    /\.mp4(\?|$)/i.test(videoUrl) || v?.mime_type === 'video_mp4';
 
   if (looksLikeMp4) {
     try {
@@ -2180,17 +2203,17 @@ if (videoUrl) {
       return;
     } catch (err) {
       console.warn('Attach mp4 failed, fallback to URL:', err?.message);
-      // rơi xuống gửi URL
     }
   }
-
-  // không chắc là mp4 (HLS, webm, …) hoặc attach thất bại -> gửi URL
+  // không phải mp4 hoặc attach thất bại -> gửi URL
   await interaction.followUp({ content: videoUrl });
   return;
 }
 
-// 3) Không có gì để gửi
-await interaction.followUp({ content: '❌ Không tìm thấy video/ảnh để tải.' });
+// 5) Không có gì để gửi
+await interaction.followUp({
+  content: '❌ Không tìm thấy video/ảnh để tải.',
+});
    
     return;
   } catch (err) {

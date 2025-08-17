@@ -2205,10 +2205,6 @@ if (videoUrl) {
       console.warn('Attach mp4 failed, fallback to URL:', err?.message);
     }
   }
-  // không phải mp4 hoặc attach thất bại -> gửi URL
-  await interaction.followUp({ content: videoUrl });
-  return;
-}
 
 // 5) Không có gì để gửi
 await interaction.followUp({

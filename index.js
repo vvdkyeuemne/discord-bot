@@ -2161,17 +2161,18 @@ const embed = new EmbedBuilder()
   .setFooter({ text: 'Nguồn: TikTok' })
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
-// ======= GỬI KẾT QUẢ =======
-/** Lấy ảnh (nếu là bài ảnh) */
-const imgUrls = Array.isArray(v.images)
+// ======== GỬI KẾT QUẢ ========
+
+// Lấy mảng ảnh (nếu là bài ảnh)
+const imageUrls = Array.isArray(v.images)
   ? v.images
-      .map(x => (typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src)))
+      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
       .filter(Boolean)
   : [];
-const isImagePost = imgUrls.length > 0;
+const isImagePost = imageUrls.length > 0;
 
-/** Tìm video URL (chỉ tìm khi KHÔNG phải bài ảnh) */
-let finalVideoUrl = null;
+// Chỉ tìm videoUrl khi KHÔNG phải bài ảnh
+let videoUrl = null;
 if (!isImagePost) {
   const candidates = [
     v.video?.noWatermark,
@@ -2183,17 +2184,17 @@ if (!isImagePost) {
     v.wmplay,
   ].filter(Boolean);
 
-  // Ưu tiên link mp4 thật sự
-  finalVideoUrl =
-    candidates.find(u => /^https?:\/\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) ||
-    candidates[0] || null;
+  // Ưu tiên link thực sự là mp4/mov
+  videoUrl =
+    candidates.find(u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) ?? null;
 }
 
-/** 1) Nếu là BÀI ẢNH: gửi tối đa 10 ảnh + embed (ảnh đầu làm preview) */
+// 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng THUMBNAIL cho embed để KHÔNG bị “2 ảnh”
 if (isImagePost) {
+  embed.setThumbnail(author?.avatar || imageUrls[0] || null); // KHÔNG dùng setImage
   await interaction.editReply({
-    embeds: [embed.setImage(imgUrls[0] || null)],
-    files: imgUrls.slice(0, 10).map((url, i) => ({
+    embeds: [embed],
+    files: imageUrls.slice(0, 10).map((url, i) => ({
       attachment: url,
       name: `tiktok_${i + 1}.jpg`,
     })),
@@ -2201,24 +2202,19 @@ if (isImagePost) {
   return;
 }
 
-/** 2) Nếu là VIDEO: ưu tiên gửi file (đẹp), lỗi thì fallback sang URL */
-if (finalVideoUrl) {
-  try {
-    await interaction.editReply({
-      embeds: [embed],
-      files: [{ attachment: finalVideoUrl, name: `tiktok_${Date.now()}.mp4` }],
-    });
-  } catch (err) {
-    console.warn('Send file failed, fallback to URL:', err?.message);
-    await interaction.editReply({
-      embeds: [embed],
-      content: finalVideoUrl,
-    });
-  }
+// 2) VIDEO: muốn embed hiện TRƯỚC video => gửi 2 tin nhắn
+if (videoUrl) {
+  // Tin 1: chỉ embed
+  await interaction.editReply({ embeds: [embed] });
+
+  // Tin 2: chỉ video (followUp tạo message mới nối tiếp)
+  await interaction.followUp({
+    files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
+  });
   return;
 }
 
-/** 3) Không có gì để gửi */
+// 3) Không có gì để gửi
 await interaction.editReply({
   content: '❌ Không tìm thấy video/ảnh để tải.',
 });

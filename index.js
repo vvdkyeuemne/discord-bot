@@ -2037,161 +2037,226 @@ client.on('interactionCreate', async (interaction) => {
 
 
 
-// ================= Auto tải TikTok khi có link trong tin nhắn =================
-client.on('messageCreate', async (message) => {
+// ================== HÀM CHUNG: lấy dữ liệu & build kết quả ==================
+async function fetchTikTokPayload(inputUrlRaw) {
+  // 1) Làm sạch & bắt URL
+  const m = String(inputUrlRaw || "").match(/https?:\/\/(?:www\.)?(?:vt\.|www\.)?tiktok\.com\/[^\s<>)]+/i);
+  if (!m) throw new Error("NO_URL");
+
+  let inputUrl = m[0]
+    .replace(/[<>()\[\]\s]/g, "")
+    .replace(/[,;]+$/g, "")
+    .trim();
+
+  // 2) Resolve vt.tiktok.com nếu có
+  let resolvedUrl = inputUrl;
   try {
-    if (message.author.bot) return;
-
-    // Nhận diện link TikTok trong nội dung tin nhắn
-    const m = message.content.match(/https?:\/\/(?:www\.)?tiktok\.com\/[^\s]+/i);
-    if (!m) return;
-
-    // ---- Chuẩn hoá URL + follow vt.tiktok nếu có ----
-    const inputUrl = m[0].trim();
-    let resolvedUrl = inputUrl;
-
-    try {
-      if (/https?:\/\/vt\.tiktok\.com/i.test(inputUrl)) {
-        const head = await axios.head(inputUrl, {
-          maxRedirects: 0,
-          validateStatus: s => (s >= 200 && s < 400),
-          timeout: 10000,
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
-          },
-        });
-        const loc = head.headers?.location;
-        if (loc) {
-          resolvedUrl = /^https?:\/\//i.test(loc) ? loc : new URL(loc, 'https://vt.tiktok.com').href;
-        }
-      }
-    } catch (e) {
-      // cứ dùng inputUrl nếu HEAD lỗi
-      resolvedUrl = inputUrl;
-    }
-
-    // ---- Gọi API tikwm ----
-    const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(resolvedUrl)}`;
-    const { data: apiResp } = await axios.get(apiUrl, { timeout: 15000 });
-    const apiData = apiResp?.data;
-
-    if (apiResp?.code !== 0 || !apiData) {
-      await message.reply('❌ Không thể tải từ TikTok lúc này (API lỗi hoặc link sai).');
-      return;
-    }
-
-    // Lấy object "v" (video / image post)
-    const v = apiData || {};
-    const author = v.author || {};
-
-    // Ảnh (nếu là bài ảnh)
-    const imageUrls = Array.isArray(v.images)
-      ? v.images.map(x => (typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))).filter(Boolean)
-      : [];
-    const isImagePost = imageUrls.length > 0;
-
-    // Thumbnail/cover
-    const cover =
-      v.cover ||
-      v.dynamic_cover ||
-      v.origin_cover ||
-      author.avatar ||
-      null;
-
-    // Helper nhỏ
-    const nf = (n) => (n ?? 0).toLocaleString('vi-VN');
-    const dur = (s = 0) => {
-      const m = Math.floor((s || 0) / 60);
-      const ss = Math.floor((s || 0) % 60);
-      return `${m}:${String(ss).padStart(2, '0')}`;
-    };
-
-    // Build embed
-    const embed = new EmbedBuilder()
-      .setColor(0x80c2ea)
-      .setTitle((v.title || '').slice(0, 240) || 'Video TikTok')
-      .setURL(resolvedUrl)
-      .setThumbnail(cover || null)
-      .setAuthor({
-        name: author.nickname || author.unique_id || 'TikTok',
-        iconURL: author.avatar || null,
-      })
-      .addFields(
-        { name: '❤️ Thích', value: nf(v?.statistics?.digg_count ?? v?.stats?.digg_count), inline: true },
-        { name: '💬 Bình luận', value: nf(v?.statistics?.comment_count ?? v?.stats?.comment_count), inline: true },
-        { name: '🔁 Chia sẻ', value: nf(v?.statistics?.share_count ?? v?.stats?.share_count), inline: true },
-        { name: '▶️ Lượt xem', value: nf(v?.statistics?.play_count ?? v?.stats?.play_count), inline: true },
-        { name: '⏱️ Thời lượng', value: dur(v?.duration), inline: true },
-        { name: '🌎 Khu vực', value: (v?.region || '').toUpperCase() || '—', inline: true },
-      )
-      .setFooter({ text: 'Nguồn: TikTok' });
-
-    if (v?.create_time) {
-      embed.setTimestamp(new Date(v.create_time * 1000));
-    }
-
-    // 1) Gửi EMBED TRƯỚC
-    await message.reply({ embeds: [embed] });
-
-    // 2) Nếu là BÀI ẢNH: gửi tối đa 10 ảnh
-    if (isImagePost) {
-      await message.reply({
-        files: imageUrls.slice(0, 10).map((url, i) => ({
-          attachment: url,
-          name: `tiktok_${i + 1}.jpg`,
-        })),
+    if (/https?:\/\/(www\.)?vt\.tiktok\.com/i.test(inputUrl)) {
+      const head = await axios.head(inputUrl, {
+        maxRedirects: 0,
+        validateStatus: s => s >= 200 && s < 400,
+        timeout: 10000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36",
+        },
       });
-      return; // không xử lý video nữa
+      const loc = head.headers?.location;
+      if (loc) {
+        resolvedUrl = loc.startsWith("http")
+          ? new URL(loc).href
+          : new URL(loc, "https://vt.tiktok.com").href;
+      }
     }
+  } catch (_) {
+    // bỏ qua, dùng inputUrl
+  }
 
-    // 3) Nếu là VIDEO
-    // Ưu tiên mp4
-    const candidates = [
-      v.video?.nowatermark,
+  // 3) Gọi API
+  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(resolvedUrl)}`;
+  const resp = await axios.get(apiUrl, { timeout: 15000 });
+  const apiData = resp.data;
+  if (!apiData || apiData.code !== 0 || !apiData.data) throw new Error("API_FAIL");
+
+  const v = apiData.data;
+  const author = v.author || {};
+
+  // ===== build embed =====
+  const nf  = (n) => (n ?? 0).toLocaleString("vi-VN");
+  const dur = (s) => {
+    const mm = Math.floor((s ?? 0) / 60);
+    const ss = Math.floor((s ?? 0) % 60);
+    return `${mm}:${String(ss).padStart(2,"0")}`;
+  };
+
+  const cover =
+    v.cover ||
+    v.dynamic_cover ||
+    v.origin_cover ||
+    author.avatar ||
+    null;
+
+  const likes    = v.digg_count    ?? v.stats?.digg_count    ?? 0;
+  const comments = v.comment_count ?? v.stats?.comment_count ?? 0;
+  const shares   = v.share_count   ?? v.stats?.share_count   ?? 0;
+  const plays    = v.play_count    ?? v.stats?.play_count    ?? 0;
+  const duration = v.duration      ?? v.video?.duration      ?? 0;
+  const region   = v.region        ?? v.stats?.region        ?? "";
+
+  let title = v.title?.slice(0, 240) || "Video TikTok";
+  if ((!title || title === "Video TikTok") && v.music?.title) title = `🎵 ${v.music.title}`;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x80d2ea)
+    .setTitle(title)
+    .setURL(resolvedUrl || inputUrl)
+    .setThumbnail(cover)
+    .setAuthor({
+      name: author.nickname || author.unique_id || "TikTok",
+      iconURL: author.avatar || null,
+    })
+    .addFields(
+      { name: "❤️ Thích",      value: nf(likes),    inline: true },
+      { name: "💬 Bình luận",  value: nf(comments), inline: true },
+      { name: "🔁 Chia sẻ",    value: nf(shares),   inline: true },
+      { name: "▶️ Lượt xem",   value: nf(plays),    inline: true },
+      { name: "⏱️ Thời lượng", value: dur(duration),inline: true },
+      { name: "🌍 Khu vực",    value: region || "—",inline: true },
+    )
+    .setFooter({ text: "Nguồn: TikTok" })
+    .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
+
+  // Ảnh
+  const imageUrls = Array.isArray(v.images)
+    ? v.images
+        .map(x => (typeof x === "string" ? x : (x?.url || x?.img_url || x?.src)))
+        .filter(Boolean)
+    : [];
+
+  // Video (nếu không phải bài ảnh)
+  let videoUrl = null;
+  if (imageUrls.length === 0) {
+    const cands = [
       v.video?.no_watermark,
-      v.video2?.nowatermark,
+      v.video?.no_watermark_hd,
+      v.video?.nowatermark,
       v.nowatermark,
       v.hdplay,
       v.play,
       v.wmplay,
     ].filter(Boolean);
+    videoUrl = cands.find(u => /^https?:\/\//i.test(u)) || null;
+  }
 
-    let videoUrl =
-      candidates.find(u => /https?:\/\//i.test(u) && /\.mp4(\?|$)/i.test(u)) ||
-      candidates[0] ||
-      null;
+  return { embed, imageUrls, videoUrl };
+}
 
+// ================== SLASH COMMAND /tiktok (dùng chung logic) ==================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== "tiktok") return;
+
+  try {
+    await interaction.deferReply();
+
+    const urlFromOption = interaction.options.getString("url", true);
+    const { embed, imageUrls, videoUrl } = await fetchTikTokPayload(urlFromOption);
+
+    // Gửi EMBED trước
+    await interaction.editReply({ embeds: [embed] });
+
+    // Bài ảnh
+    if (imageUrls.length) {
+      await interaction.followUp({
+        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i+1}.jpg` })),
+      });
+      return;
+    }
+
+    // Video
     if (videoUrl) {
-      const looksLikeMp4 = /\.mp4(\?|$)/i.test(videoUrl) || /mime_type=video_mp4/i.test(videoUrl);
-
-      if (looksLikeMp4) {
+      const isMp4 = /\.mp4(\?|$)/i.test(videoUrl) || /mime_type=video_mp4/i.test(videoUrl);
+      if (isMp4) {
         try {
-          // attach file (đẹp)
-          await message.reply({
+          await interaction.followUp({
             files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
           });
           return;
         } catch (err) {
-          console.warn('Attach mp4 failed, sẽ gửi nút Link:', err?.message);
+          // Fall back sang nút link
         }
       }
 
-      // Không phải mp4 hoặc attach mp4 thất bại → gửi NÚT LINK (không dán link trần)
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel('🔗 Mở/Tải Video').setStyle(ButtonStyle.Link).setURL(videoUrl),
+        new ButtonBuilder().setLabel("▶️ Mở/Tải video").setStyle(ButtonStyle.Link).setURL(videoUrl),
       );
 
-      await message.reply({
-        content: '⚠️ Không gửi được file video.',
+      await interaction.followUp({
+        content: "⚠️ Không gửi được file video. Nhấn nút để mở/tải.",
         components: [row],
       });
       return;
     }
 
-    // 4) Không tìm thấy ảnh/video
-    await message.reply('❌ Không tìm thấy video/ảnh để tải.');
+    await interaction.followUp("❌ Không tìm thấy video/ảnh để tải.");
   } catch (err) {
-    console.error('Auto TikTok error:', err);
+    console.error("Slash /tiktok error:", err);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp({ content: "❌ Có lỗi xảy ra. Hãy thử lại sau.", ephemeral: true });
+    } else {
+      await interaction.reply({ content: "❌ Có lỗi xảy ra. Hãy thử lại sau.", ephemeral: true });
+    }
+  }
+});
+
+// ================== AUTO TẢI: phát hiện link TikTok trong tin nhắn ==================
+client.on("messageCreate", async (message) => {
+  try {
+    if (message.author.bot) return;
+
+    const maybeUrl = message.content;
+    const { embed, imageUrls, videoUrl } = await fetchTikTokPayload(maybeUrl);
+
+    // EMBED trước
+    await message.channel.send({ embeds: [embed] });
+
+    // Bài ảnh
+    if (imageUrls.length) {
+      await message.channel.send({
+        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i+1}.jpg` })),
+      });
+      return;
+    }
+
+    // Video
+    if (videoUrl) {
+      const isMp4 = /\.mp4(\?|$)/i.test(videoUrl) || /mime_type=video_mp4/i.test(videoUrl);
+      if (isMp4) {
+        try {
+          await message.channel.send({
+            files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
+          });
+          return;
+        } catch (err) {
+          // fallback sang link
+        }
+      }
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel("▶️ Mở/Tải video").setStyle(ButtonStyle.Link).setURL(videoUrl),
+      );
+      await message.channel.send({
+        content: "⚠️ Không gửi được file video. Nhấn nút để mở/tải.",
+        components: [row],
+      });
+      return;
+    }
+
+    await message.channel.send("❌ Không tìm thấy video/ảnh để tải.");
+  } catch (err) {
+    // Không log ầm ỹ nếu tin nhắn không có link hợp lệ
+    if (err?.message !== "NO_URL") {
+      console.error("Auto TikTok error:", err?.message || err);
+    }
   }
 });

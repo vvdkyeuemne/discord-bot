@@ -10,7 +10,6 @@
   "dependencies": {
     "@discordjs/voice": "^0.18.0",
     "@distube/yt-dlp": "^2.0.1",
-    "@distube/ytpl-core": "^4.16.12",
     "@google/generative-ai": "^0.24.1",
     "@napi-rs/canvas": "^0.1.77",
     "@vitalets/google-translate-api": "^9.2.1",

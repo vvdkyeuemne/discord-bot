@@ -2163,22 +2163,25 @@ const isImagePost = imageUrls.length > 0;
 // Chỉ tìm link video khi KHÔNG phải bài ảnh
 let videoUrl = null;
 if (!isImagePost) {
-    const candidates = [
-        v.video?.nowatermark,
-        v.video?.no_watermark,
-        v.video2?.nowatermark,
-        v.video2?.no_watermark, // phòng API khác tên
-        v.nwmplay,
-        v.hdplay,
-        v.play,
-        v.wmplay,
-    ].filter(Boolean);
+  const candidates = [
+    v.video?.nowatermark,
+    v.video2?.nowatermark,
+    v.video?.no_watermark,
+    v.video2?.no_watermark, // phòng API khác tên
+    v.nowatermark,
+    v.hdplay,
+    v.play,
+    v.wmplay,
+  ].filter(Boolean);
 
-    // Ưu tiên link thực sự là mp4/mov
-    videoUrl = candidates.find(u => /^https?:\/\/./.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) || null;
+  // Ưu tiên link thực sự là mp4/mov
+  videoUrl =
+    candidates.find(
+      u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)
+    ) || null;
 }
 
-// 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng thumbnail cho embed (tránh bị “2 ảnh”)
+// 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng thumbnail cho embed
 if (isImagePost) {
   embed.setThumbnail(author?.avatar || imageUrls[0] || null); // KHÔNG dùng setImage
   await interaction.editReply({
@@ -2191,28 +2194,25 @@ if (isImagePost) {
   return;
 }
 
-// 2) VIDEO: gửi file kèm embed; lỗi upload -> fallback sang URL
-if (dlVideoUrl) {
-  try {
-    await interaction.editReply({
-      embeds: [embed],
-      files: [{ attachment: dlVideoUrl, name: `tiktok_${Date.now()}.mp4` }],
-    });
-  } catch (err) {
-    console.warn('Send file failed, fallback to URL:', err?.message);
-    await interaction.editReply({
-      embeds: [embed],
-      content: dlVideoUrl,
-    });
-  }
+// 2) BÀI VIDEO: gửi link video kèm embed
+if (videoUrl) {
+  embed.setDescription(`[Xem video gốc](${v.share_url || url})`);
+  await interaction.editReply({
+    embeds: [embed],
+    files: [
+      {
+        attachment: videoUrl,
+        name: `tiktok.mp4`,
+      },
+    ],
+  });
   return;
 }
 
-// 3) Không có gì để gửi
+// 3) Trường hợp không có gì để gửi
 await interaction.editReply({
   content: '❌ Không tìm thấy video/ảnh để tải.',
 });
-
    
     return;
   } catch (err) {

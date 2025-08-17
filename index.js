@@ -2162,17 +2162,18 @@ const embed = new EmbedBuilder()
   .setFooter({ text: 'Nguồn: TikTok' })
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
-// ===== GỬI KẾT QUẢ =====
+// ====== GỬI KẾT QUẢ ======
 
-// Lấy mảng ảnh (bài ảnh)
-const images = Array.isArray(v.images)
+// Lấy mảng ảnh (nếu là bài ảnh)
+const imageUrls = Array.isArray(v.images)
   ? v.images
       .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
       .filter(Boolean)
   : [];
-const isImagePost = images.length > 0;
 
-// Chỉ tính videoUrl khi KHÔNG phải bài ảnh
+const isImagePost = imageUrls.length > 0;
+
+// Chỉ tìm videoUrl khi KHÔNG phải bài ảnh
 let videoUrl = null;
 if (!isImagePost) {
   const candidates = [
@@ -2187,15 +2188,15 @@ if (!isImagePost) {
 
   // Ưu tiên link mp4 thật sự
   videoUrl =
-    candidates.find(u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) ||
+    candidates.find(u => /^https?:\/\/\//.test(u) && /\.(mp4|mov)(\?|#|$)/i.test(u)) ||
     candidates[0] || null;
 }
 
-// 1) BÀI ẢNH: gửi tối đa 10 ảnh + 1 embed (ảnh đầu làm preview)
+// 1) Nếu là BÀI ẢNH: gửi tối đa 10 ảnh + embed (ảnh đầu làm preview)
 if (isImagePost) {
   await interaction.editReply({
-    embeds: [ embed.setImage(images[0] || null) ],
-    files: images.slice(0, 10).map((url, i) => ({
+    embeds: [ embed.setImage(imageUrls[0] || null) ],
+    files: imageUrls.slice(0, 10).map((url, i) => ({
       attachment: url,
       name: `tiktok_${i + 1}.jpg`
     }))
@@ -2203,12 +2204,20 @@ if (isImagePost) {
   return;
 }
 
-// 2) VIDEO: chỉ chèn URL để Discord tự play, KHÔNG đính kèm file
+// 2) Nếu là VIDEO: ưu tiên gửi file (đẹp), lỗi thì fallback sang URL
 if (videoUrl) {
-  await interaction.editReply({
-    embeds: [embed],
-    content: videoUrl
-  });
+  try {
+    await interaction.editReply({
+      embeds: [embed],
+      files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }]
+    });
+  } catch (err) {
+    console.warn('Send file failed, fallback to URL:', err?.message);
+    await interaction.editReply({
+      embeds: [embed],
+      content: videoUrl
+    });
+  }
   return;
 }
 

@@ -2150,41 +2150,14 @@ const embed = new EmbedBuilder()
   .setFooter({ text: 'Nguồn: TikTok' })
   .setTimestamp(v.create_time ? new Date(v.create_time * 1000) : new Date());
 
-// ======== GỬI KẾT QUẢ ========
-    
-// 1) BÀI ẢNH: lấy mảng ảnh an toàn
-const imageUrls = Array.isArray(v.images)
-  ? v.images
-      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
-      .filter(Boolean)
-  : [];
-const isImagePost = imageUrls.length > 0;
+// ===== GỬI KẾT QUẢ: EMBED TRƯỚC, FILE SAU =====
 
-// 2) VIDEO: chỉ cố lấy url khi KHÔNG phải bài ảnh
-let videoUrl = null;
-if (!isImagePost) {
-  const candidates = [
-    v.video?.nowatermark,
-    v.video?.no_watermark,
-    v.video?.noWatermark,
-    v.video2?.nowatermark,   // phòng API khác tên
-    v.noWatermark,
-    v.hdplay,
-    v.play,
-    v.wmplay,
-  ].filter(Boolean);
+// 0) Gửi EMBED trước
+await interaction.editReply({ embeds: [embed] });
 
-  // Ưu tiên link có vẻ là mp4/mov (để attach file); nếu không có, vẫn lấy tạm link đầu
-  videoUrl =
-    candidates.find(u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) ||
-    candidates[0] || null;
-}
-
-// 3) Nếu là BÀI ẢNH: embed + đính kèm ảnh (thumbnail cho embed để tránh “2 ảnh”)
-if (isImagePost) {
-  embed.setThumbnail(author?.avatar || imageUrls[0] || null);
-  await interaction.editReply({
-    embeds: [embed],
+// 1) Nếu là BÀI ẢNH: followUp gửi tối đa 10 ảnh (không dùng setImage để tránh hiện 2 ảnh)
+if (isImagePost && imageUrls.length) {
+  await interaction.followUp({
     files: imageUrls.slice(0, 10).map((url, i) => ({
       attachment: url,
       name: `tiktok_${i + 1}.jpg`,
@@ -2193,15 +2166,15 @@ if (isImagePost) {
   return;
 }
 
-// 4) Nếu là VIDEO: ưu tiên gửi file nếu là mp4; nếu không, gửi embed + URL
+// 2) Nếu là VIDEO: ưu tiên mp4 -> attach file; nếu không thì gửi URL
 if (videoUrl) {
-  const looksLikeMp4 = /\.(mp4|mov)(\?|$)/i.test(videoUrl) ||
-                       /mime_type=video_mp4/i.test(videoUrl);
+  const looksLikeMp4 =
+    /\.(mp4|mov)(\?|$)/i.test(videoUrl) ||
+    /mime_type=video_mp4/i.test(videoUrl);
 
   if (looksLikeMp4) {
     try {
-      await interaction.editReply({
-        embeds: [embed],
+      await interaction.followUp({
         files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
       });
       return;
@@ -2211,18 +2184,13 @@ if (videoUrl) {
     }
   }
 
-  // không chắc là mp4 (HLS, webm, …) hoặc attach thất bại → gửi URL cho người dùng
-  await interaction.editReply({
-    embeds: [embed],
-    content: videoUrl,
-  });
+  // không chắc là mp4 (HLS, webm, …) hoặc attach thất bại -> gửi URL
+  await interaction.followUp({ content: videoUrl });
   return;
 }
 
-// 5) Không có gì để gửi
-await interaction.editReply({
-  content: '❌ Không tìm thấy video/ảnh để tải.',
-});
+// 3) Không có gì để gửi
+await interaction.followUp({ content: '❌ Không tìm thấy video/ảnh để tải.' });
    
     return;
   } catch (err) {

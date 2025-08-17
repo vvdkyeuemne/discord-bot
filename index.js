@@ -2117,7 +2117,6 @@ const videoUrl =
   null;
 
 // Mảng ảnh (nếu là bài ảnh)
-const images = Array.isArray(v.images) ? v.images : [];
 
 // Thumbnail/cover
 const cover =

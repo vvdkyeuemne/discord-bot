@@ -1,0 +1,11 @@
+{
+  "1403572945389097050": {
+    "channelId": "1404385559610396805",
+    "message": "hi"
+  },
+  "1329819713450278952": {
+    "channelId": "1401402869713993728",
+    "message": "Chào mừng {user} đến với **{server}**! Bạn là thành viên thứ {count} 🎉",
+    "hello": true
+  }
+}

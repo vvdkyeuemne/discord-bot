@@ -1,0 +1,16 @@
+{
+  "1403572945389097050": {
+    "djRoleId": "1403579401152630787",
+    "sameChannelOnly": true,
+    "voteSkip": true,
+    "voteSkipRatio": 0.5,
+    "queueMax": 20,
+    "perUserMax": 10,
+    "maxDurationSec": 21600,
+    "maxVolume": 50,
+    "cooldownMs": 2000,
+    "autoplay": true,
+    "leaveOnIdle": true,
+    "idleLeaveMs": 10000
+  }
+}

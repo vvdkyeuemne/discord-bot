@@ -1,0 +1,18 @@
+[
+  { "q": "HTTP 404 là gì?", "choices": ["OK","Forbidden","Not Found","Server Error"], "ans": 2, "exp": "404 nghĩa là tài nguyên không tồn tại." },
+  { "q": "Thủ đô của Nhật Bản?", "choices": ["Seoul","Tokyo","Kyoto","Osaka"], "ans": 1, "exp": "Tokyo là thủ đô hiện tại." },
+  { "q": "2 + 2 * 2 = ?", "choices": ["6","8","4","10"], "ans": 0, "exp": "Nhân trước, 2*2=4, 2+4=6." },
+  { "q": "Ngôn ngữ chạy trên Node.js?", "choices": ["Python","Java","JavaScript","C#"], "ans": 2, "exp": "Node.js thực thi JavaScript phía server." },
+  { "q": "Git lệnh nào để tải thay đổi mới nhất về?", "choices": ["git push","git pull","git add","git init"], "ans": 1, "exp": "git pull để kéo thay đổi từ remote." },
+  { "q": "Hệ điều hành nào là mã nguồn mở?", "choices": ["Windows","macOS","Linux","iOS"], "ans": 2, "exp": "Linux là OS mã nguồn mở phổ biến." },
+  { "q": "HTML viết tắt của?", "choices": ["HyperText Markup Language","HighText Markdown Language","Hyper Transfer Markup Level","Home Tool Markup Language"], "ans": 0, "exp": "Chuẩn là HyperText Markup Language." },
+  { "q": "CSS dùng để?", "choices": ["Xử lý dữ liệu","Tạo API","Định kiểu giao diện","Lưu DB"], "ans": 2, "exp": "CSS dùng để định kiểu (style) cho HTML." },
+  { "q": "HTTP status 200 nghĩa là?", "choices": ["OK","Bad Request","Unauthorized","Not Found"], "ans": 0, "exp": "200 OK: thành công." },
+  { "q": "SQL dùng để?", "choices": ["Tạo giao diện","Tương tác CSDL","Vẽ đồ họa","Nén ảnh"], "ans": 1, "exp": "Structured Query Language để làm việc với CSDL." },
+  { "q": "Biểu tượng cờ Nhật?", "choices": ["Ngôi sao vàng","Mặt trời đỏ","Vệt xanh","Cầu vồng"], "ans": 1, "exp": "Hình mặt trời đỏ giữa nền trắng." },
+  { "q": "Kí hiệu toán học cho lũy thừa?", "choices": ["+","-","*","^"], "ans": 3, "exp": "^ thường dùng biểu diễn lũy thừa (ngoài LaTeX)." },
+  { "q": "RESTful thường dùng phương thức nào để tạo mới?", "choices": ["GET","POST","PUT","DELETE"], "ans": 1, "exp": "POST thường dùng để tạo tài nguyên mới." },
+  { "q": "JS: typeof null là gì?", "choices": ["'object'","'null'","'undefined'","'number'"], "ans": 0, "exp": "Lịch sử để lại: typeof null === 'object'." },
+  { "q": "JSON viết tắt của?", "choices": ["Java Source Object Notation","JavaScript Object Notation","Just Simple Object Network","Join Script Object Node"], "ans": 1, "exp": "JSON = JavaScript Object Notation." },
+  { "q": "DNS dùng để?", "choices": ["Mã hóa dữ liệu","Phân giải tên miền","Lưu trữ file","Chạy ứng dụng"], "ans": 1, "exp": "DNS phân giải tên miền thành địa chỉ IP." }
+]

@@ -2155,18 +2155,18 @@ const embed = new EmbedBuilder()
 // Lấy mảng ảnh (nếu là bài ảnh)
 const imageUrls = Array.isArray(v.images)
   ? v.images
-      .map(x => typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src))
+      .map(x => (typeof x === 'string' ? x : (x?.url || x?.img_url || x?.src)))
       .filter(Boolean)
   : [];
 const isImagePost = imageUrls.length > 0;
 
-// Chỉ tìm videoUrl khi KHÔNG phải bài ảnh
-let videoUrl = null;
+// Chỉ tìm link video khi KHÔNG phải bài ảnh
+let dlVideoUrl = null;
 if (!isImagePost) {
   const candidates = [
     v.video?.nowatermark,
     v.video?.no_watermark,
-    v.video?.nowatermark,
+    v.video?.nowatermark, // phòng API khác tên
     v.noWatermark,
     v.hdplay,
     v.play,
@@ -2174,11 +2174,10 @@ if (!isImagePost) {
   ].filter(Boolean);
 
   // Ưu tiên link thực sự là mp4/mov
-  videoUrl =
-    candidates.find(u => /^https?:\/\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) || null;
+  dlVideoUrl = candidates.find(u => /^https?:\/\//.test(u) && /\.(mp4|mov)(\?|$)/i.test(u)) || null;
 }
 
-// 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng THUMBNAIL cho embed (đừng setImage để khỏi bị “2 ảnh”)
+// 1) BÀI ẢNH: chỉ đính kèm ảnh + dùng thumbnail cho embed (tránh bị “2 ảnh”)
 if (isImagePost) {
   embed.setThumbnail(author?.avatar || imageUrls[0] || null); // KHÔNG dùng setImage
   await interaction.editReply({
@@ -2191,18 +2190,18 @@ if (isImagePost) {
   return;
 }
 
-// 2) VIDEO: gửi file mp4 kèm embed; nếu upload fail -> fallback gửi URL
-if (videoUrl) {
+// 2) VIDEO: gửi file kèm embed; lỗi upload -> fallback sang URL
+if (dlVideoUrl) {
   try {
     await interaction.editReply({
       embeds: [embed],
-      files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
+      files: [{ attachment: dlVideoUrl, name: `tiktok_${Date.now()}.mp4` }],
     });
   } catch (err) {
     console.warn('Send file failed, fallback to URL:', err?.message);
     await interaction.editReply({
       embeds: [embed],
-      content: videoUrl,
+      content: dlVideoUrl,
     });
   }
   return;
@@ -2212,6 +2211,7 @@ if (videoUrl) {
 await interaction.editReply({
   content: '❌ Không tìm thấy video/ảnh để tải.',
 });
+
    
     return;
   } catch (err) {

@@ -2105,17 +2105,6 @@ client.on('interactionCreate', async (interaction) => {
 const v = apiData?.data || apiData || {};
 const author = v.author || {};
 
-// Video URL (ưu tiên không watermark)
-const videoUrl =
-  v.video?.noWatermark ||
-  v.video?.no_watermark ||
-  v.video?.nowatermark ||
-  v.noWatermark ||
-  v.hdplay ||
-  v.play ||
-  v.wmplay ||
-  null;
-
 // Mảng ảnh (nếu là bài ảnh)
 
 // Thumbnail/cover

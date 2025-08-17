@@ -2205,12 +2205,13 @@ if (videoUrl) {
       console.warn('Attach mp4 failed, fallback to URL:', err?.message);
     }
   }
+}
 
 // 5) Không có gì để gửi
 await interaction.followUp({
   content: '❌ Không tìm thấy video/ảnh để tải.',
 });
-   
+
     return;
   } catch (err) {
     console.error('TikTok handler error:', err);

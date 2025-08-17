@@ -2190,25 +2190,40 @@ if (isImagePost) {
   return;
 }
 
-// 4) Nếu là VIDEO: ưu tiên attach file mp4, lỗi thì gửi URL
+// 4) Nếu là VIDEO
 if (videoUrl) {
+  // Nhận diện link mp4 (đuôi .mp4 hoặc query mime_type=video_mp4)
   const looksLikeMp4 =
-    /\.mp4(\?|$)/i.test(videoUrl) || v?.mime_type === 'video_mp4';
+    /\.mp4(\?|$)/i.test(videoUrl) ||
+    /mime_type=video_mp4/i.test(videoUrl);
 
   if (looksLikeMp4) {
     try {
+      // Ưu tiên gửi file mp4
       await interaction.followUp({
         files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
       });
       return;
     } catch (err) {
-      console.warn('Attach mp4 failed, fallback to URL:', err?.message);
+      console.warn('Attach mp4 failed, sẽ fallback qua link button:', err?.message);
+      // rơi xuống gửi button link
     }
   }
-  // nếu không chắc là mp4 (HLS, webm, ...) hoặc attach thất bại -> chỉ gửi embed, không in URL
-await interaction.followUp({ content: "⚠️ Không gửi được file video." });
-return;
-}
+
+  // Không phải mp4 HOẶC attach mp4 thất bại -> gửi NÚT LINK gọn
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('Mở/Tải video')
+      .setStyle(ButtonStyle.Link)
+      .setURL(videoUrl)
+  );
+
+  await interaction.followUp({
+    content: '⚠️ Không gửi được file video. Nhấn nút để mở/tải:',
+    components: [row],
+  });
+  return;
+  }
 
 // 5) Không có gì để gửi
 await interaction.followUp({

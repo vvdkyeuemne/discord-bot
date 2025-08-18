@@ -581,6 +581,7 @@ const commands = [
   new SlashCommandBuilder().setName('np').setDescription('Bài đang phát'),
   new SlashCommandBuilder().setName('queue').setDescription('Xem hàng đợi'),
   new SlashCommandBuilder().setName('volume').setDescription('Đặt âm lượng (0–200%)').addIntegerOption(o=>o.setName('percent').setDescription('0–200').setRequired(true)),
+  new SlashCommandBuilder().setName('seek').setDescription('Tua bài nhạc hiện tại đến vị trí (tính bằng giây).').addIntegerOption(opt =>opt.setName('seconds').setDescription('Số giây cần tua đến').setRequired(true)),
 
   // MUSIC (SoundCloud)
   new SlashCommandBuilder()
@@ -1696,9 +1697,26 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       q.player.unpause(); return interaction.reply('▶️ Tiếp tục phát.');
     }
     if (interaction.commandName === 'np') {
-      const q=getQ(interaction.guildId); if(!q.now) return interaction.reply('🤷 Không có bài nào đang phát.');
-      return interaction.reply(`🎶 **Đang phát:** ${q.now.title}`);
-    }
+  const q = getQ(interaction.guildId);
+  if (!q.now) {
+    return interaction.reply('🤷 Không có bài nào đang phát.');
+  }
+
+  // Tính thời gian đã phát và tổng thời lượng
+  const pos = Math.floor((q.player.state.resource.playbackDuration || 0) / 1000);
+  const dur = q.now.duration || 0;
+
+  // Thanh tiến trình (10 ô)
+  const totalBars = 10;
+  const progress = dur ? Math.round((pos / dur) * totalBars) : 0;
+  const bar = '▬'.repeat(progress) + '🔘' + '▬'.repeat(totalBars - progress);
+
+  return interaction.reply(
+    `🎶 **Đang phát:** [${q.now.title}](${q.now.url})\n` +
+    `⏱️ ${fmtTime(pos)} / ${fmtTime(dur)}\n` +
+    `${bar}`
+  );
+   }
     if (interaction.commandName === 'queue') {
       const q=getQ(interaction.guildId);
       if (!q.now && !q.queue.length) return interaction.reply('📭 Hàng đợi trống.');
@@ -1712,7 +1730,37 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       try { q.player?.state?.resource?.volume?.setVolume(q.volume); } catch {}
       return interaction.reply(`🔊 Âm lượng: **${p}%**`);
     }
+    if (interaction.commandName === 'seek') {
+  const q = getQ(interaction.guildId);
+  if (!q || !q.now || !q.player) {
+    return interaction.reply({ content: "❌ Không có bài nào đang phát.", ephemeral: true });
+  }
 
+  const seconds = interaction.options.getInteger("seconds", true);
+  if (seconds < 0) {
+    return interaction.reply({ content: "❌ Thời gian không hợp lệ.", ephemeral: true });
+  }
+
+  try {
+    // Dừng phát hiện tại
+    q.player.stop();
+
+    // Tạo resource mới từ URL hiện tại, bắt đầu từ thời gian seconds
+    const resource = createAudioResource(q.now.url, {
+      inlineVolume: true,
+      ffmpeg: { before_options: `-ss ${seconds}` }
+    });
+
+    // Phát lại từ thời điểm mới
+    q.player.play(resource);
+
+    await interaction.reply(`⏩ Đã tua đến **${seconds} giây** trong bài \`${q.now.title}\``);
+  } catch (err) {
+    console.error("Seek error:", err);
+    await interaction.reply({ content: "❌ Không thể tua bài hát.", ephemeral: true });
+  }
+    }
+    
     // MUSIC (SoundCloud) — phân trang + meta + plays/likes + 5 ảnh
     if (interaction.commandName === 'playsc') {
       const query = interaction.options.getString('query', true);
@@ -2359,3 +2407,11 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 });
+
+// ------------------ utils ------------------
+function fmtTime(sec) {
+  if (isNaN(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}

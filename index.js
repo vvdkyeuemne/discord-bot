@@ -2082,7 +2082,35 @@ client.on('interactionCreate', async (interaction) => {
 
 
 
-// ================== HÀM CHUNG: lấy dữ liệu & build kết quả ==================
+// ========================= TikTok AUTO – SETTINGS =========================
+const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
+let tiktokSettings = { guilds: {} };
+
+async function loadTikTokSettings() {
+  try {
+    const raw = await fs.readFile(TIKTOK_SETTINGS_FILE, "utf8");
+    tiktokSettings = JSON.parse(raw || "{}") || { guilds: {} };
+  } catch {
+    tiktokSettings = { guilds: {} };
+  }
+}
+async function saveTikTokSettings() {
+  await fs.writeFile(TIKTOK_SETTINGS_FILE, JSON.stringify(tiktokSettings, null, 2));
+}
+// gọi lúc bot online (nếu bạn có client.once('ready', ...) thì thêm dòng này trong ready):
+loadTikTokSettings().catch(() => {});
+
+// Auto có bật cho message này không?
+function isTikTokAutoEnabledForMessage(msg) {
+  if (!msg.guildId) return false;             // DM: không auto
+  const g = tiktokSettings.guilds[msg.guildId];
+  if (!g || g.mode === "off") return false;   // tắt
+  if (g.mode === "server") return true;       // toàn server
+  if (g.mode === "channel") return msg.channelId === g.channelId; // chỉ kênh đã set
+  return false;
+}
+
+// ====================== HÀM CHUNG: lấy dữ liệu & build kết quả ======================
 async function fetchTikTokPayload(inputUrlRaw) {
   // 1) Làm sạch & bắt URL
   const m = String(inputUrlRaw || "").match(/https?:\/\/(?:www\.)?(?:vt\.|www\.)?tiktok\.com\/[^\s<>)]+/i);
@@ -2113,9 +2141,7 @@ async function fetchTikTokPayload(inputUrlRaw) {
           : new URL(loc, "https://vt.tiktok.com").href;
       }
     }
-  } catch (_) {
-    // bỏ qua, dùng inputUrl
-  }
+  } catch { /* bỏ qua, dùng inputUrl */ }
 
   // 3) Gọi API
   const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(resolvedUrl)}`;
@@ -2131,15 +2157,10 @@ async function fetchTikTokPayload(inputUrlRaw) {
   const dur = (s) => {
     const mm = Math.floor((s ?? 0) / 60);
     const ss = Math.floor((s ?? 0) % 60);
-    return `${mm}:${String(ss).padStart(2,"0")}`;
+    return `${mm}:${String(ss).padStart(2, "0")}`;
   };
 
-  const cover =
-    v.cover ||
-    v.dynamic_cover ||
-    v.origin_cover ||
-    author.avatar ||
-    null;
+  const cover = v.cover || v.dynamic_cover || v.origin_cover || author.avatar || null;
 
   const likes    = v.digg_count    ?? v.stats?.digg_count    ?? 0;
   const comments = v.comment_count ?? v.stats?.comment_count ?? 0;
@@ -2196,8 +2217,8 @@ async function fetchTikTokPayload(inputUrlRaw) {
   return { embed, imageUrls, videoUrl };
 }
 
-// ================== SLASH COMMAND /tiktok (dùng chung logic) ==================
-client.on("interactionCreate", async (interaction) => {
+// ========================= SLASH /tiktok =========================
+client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "tiktok") return;
 
@@ -2213,7 +2234,7 @@ client.on("interactionCreate", async (interaction) => {
     // Bài ảnh
     if (imageUrls.length) {
       await interaction.followUp({
-        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i+1}.jpg` })),
+        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i + 1}.jpg` })),
       });
       return;
     }
@@ -2227,8 +2248,8 @@ client.on("interactionCreate", async (interaction) => {
             files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
           });
           return;
-        } catch (err) {
-          // Fall back sang nút link
+        } catch {
+          // fallback sang nút link
         }
       }
 
@@ -2254,13 +2275,53 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ================== AUTO TẢI: phát hiện link TikTok trong tin nhắn ==================
-client.on("messageCreate", async (message) => {
+// ========================= SLASH /tiktokauto =========================
+// Bạn nhớ đã đăng ký slash này: name "tiktokauto" + string option "mode" (off|server|channel)
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== "tiktokauto") return;
+
+  const mode = interaction.options.getString("mode", true); // 'off' | 'server' | 'channel'
+  const gid = interaction.guildId;
+  if (!gid) {
+    return interaction.reply({ content: "Lệnh này chỉ dùng trong server.", ephemeral: true });
+  }
+
+  const g = tiktokSettings.guilds[gid] || (tiktokSettings.guilds[gid] = { mode: "off" });
+
+  if (mode === "off") {
+    g.mode = "off";
+    delete g.channelId;
+  } else if (mode === "server") {
+    g.mode = "server";
+    delete g.channelId;
+  } else if (mode === "channel") {
+    g.mode = "channel";
+    g.channelId = interaction.channelId;
+  } else {
+    return interaction.reply({ content: "❌ Mode không hợp lệ.", ephemeral: true });
+  }
+
+  await saveTikTokSettings();
+
+  return interaction.reply({
+    content:
+      g.mode === "off"
+        ? "🔕 Đã tắt auto TikTok."
+        : g.mode === "server"
+        ? "✅ Đã bật auto TikTok cho **toàn server**."
+        : `✅ Đã bật auto TikTok cho **kênh này** (<#${g.channelId}>)`,
+    ephemeral: true,
+  });
+});
+
+// ========================= AUTO tải khi có link (theo cấu hình) =========================
+client.on(Events.MessageCreate, async (message) => {
   try {
     if (message.author.bot) return;
+    if (!isTikTokAutoEnabledForMessage(message)) return;
 
-    const maybeUrl = message.content;
-    const { embed, imageUrls, videoUrl } = await fetchTikTokPayload(maybeUrl);
+    const { embed, imageUrls, videoUrl } = await fetchTikTokPayload(message.content);
 
     // EMBED trước
     await message.channel.send({ embeds: [embed] });
@@ -2268,7 +2329,7 @@ client.on("messageCreate", async (message) => {
     // Bài ảnh
     if (imageUrls.length) {
       await message.channel.send({
-        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i+1}.jpg` })),
+        files: imageUrls.slice(0, 10).map((u, i) => ({ attachment: u, name: `tiktok_${i + 1}.jpg` })),
       });
       return;
     }
@@ -2282,7 +2343,7 @@ client.on("messageCreate", async (message) => {
             files: [{ attachment: videoUrl, name: `tiktok_${Date.now()}.mp4` }],
           });
           return;
-        } catch (err) {
+        } catch {
           // fallback sang link
         }
       }
@@ -2299,7 +2360,6 @@ client.on("messageCreate", async (message) => {
 
     await message.channel.send("❌ Không tìm thấy video/ảnh để tải.");
   } catch (err) {
-    // Không log ầm ỹ nếu tin nhắn không có link hợp lệ
     if (err?.message !== "NO_URL") {
       console.error("Auto TikTok error:", err?.message || err);
     }

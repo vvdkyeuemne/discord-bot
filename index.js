@@ -1733,33 +1733,46 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
     if (interaction.commandName === 'seek') {
   const q = getQ(interaction.guildId);
   if (!q || !q.now || !q.player) {
-    return interaction.reply({ content: "❌ Không có bài nào đang phát.", ephemeral: true });
+    return interaction.reply({ content: '❌ Không có bài nào đang phát để tua.', ephemeral: true });
   }
 
-  const seconds = interaction.options.getInteger("seconds", true);
+  // lấy số giây người dùng nhập
+  const seconds = interaction.options.getInteger('seconds', true);
   if (seconds < 0) {
-    return interaction.reply({ content: "❌ Thời gian không hợp lệ.", ephemeral: true });
+    return interaction.reply({ content: '❌ Thời gian phải ≥ 0 giây.', ephemeral: true });
   }
 
   try {
-    // Dừng phát hiện tại
-    q.player.stop();
+    await interaction.deferReply({ ephemeral: true });
 
-    // Tạo resource mới từ URL hiện tại, bắt đầu từ thời gian seconds
-    const resource = createAudioResource(q.now.url, {
+    // Dừng resource hiện tại (không destroy connection)
+    try { q.player.stop(true); } catch {}
+
+    // Tạo lại stream từ URL hiện tại, có seek
+    // play-dl sẽ chọn đúng nguồn (SC/YT) và áp dụng tua
+    const s = await play.stream(q.now.url, { seek: seconds });
+
+    // Tạo resource mới từ stream trên
+    const resource = createAudioResource(s.stream, {
+      inputType: s.type,            // quan trọng: đúng codec/loại stream
       inlineVolume: true,
-      ffmpeg: { before_options: `-ss ${seconds}` }
     });
 
-    // Phát lại từ thời điểm mới
     q.player.play(resource);
 
-    await interaction.reply(`⏩ Đã tua đến **${seconds} giây** trong bài \`${q.now.title}\``);
+    await interaction.editReply(`⏩ Đã tua đến **${seconds} giây** trong bài **${q.now.title}**.`);
   } catch (err) {
-    console.error("Seek error:", err);
-    await interaction.reply({ content: "❌ Không thể tua bài hát.", ephemeral: true });
+    console.error('Seek error:', err);
+    // Thử phát lại resource cũ nếu cần (tránh đứng im)
+    try {
+      const s0 = await play.stream(q.now.url);
+      const r0 = createAudioResource(s0.stream, { inputType: s0.type, inlineVolume: true });
+      q.player.play(r0);
+    } catch {}
+
+    await interaction.editReply({ content: '❌ Tua bị lỗi. Thử lại sau nhé.' });
   }
-    }
+}
     
     // MUSIC (SoundCloud) — phân trang + meta + plays/likes + 5 ảnh
     if (interaction.commandName === 'playsc') {
@@ -1771,23 +1784,32 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
         try {
           const q = await ensureConnected(interaction);
           let title = 'SoundCloud Track';
-          try {
-            const info = await play.soundcloud(query).catch(() => null);
-            if (info) title = info.name || info.title || title;
-            else {
-              const found = await scSearchTracks(query, 1).catch(() => []);
-              if (found?.length) title = found[0].title || found[0].name || title;
-            }
-          } catch {}
-          q.queue.push({ title, url: query, by: interaction.user.tag });
-          if (q.player.state.status !== AudioPlayerStatus.Playing) await playNext(interaction.guildId);
-          return interaction.editReply({ content:`🎧 Đã thêm **${title}** vào hàng đợi.` });
-        } catch (e) {
-          console.error('playsc URL error:', e);
-          return interaction.editReply({ content:'⚠️ Không thể phát link này. Thử link khác hoặc từ khoá.' });
-        }
-      }
+         try {
+  const info = await play.soundcloud(query).catch(() => null);
+  if (!info) return interaction.editReply({ content: "❌ Không tìm thấy bài." });
 
+  const track = {
+    title: info.name || info.title,
+    url: info.url,
+    duration: info.durationInSec || 0,   // 👈 thêm thời lượng
+    user: interaction.user.username
+  };
+
+  q.queue.push(track);
+
+  if (q.player.state.status !== AudioPlayerStatus.Playing) {
+    playNext(interaction.guildId);
+  }
+
+  await interaction.editReply({
+    content: `🎧 Đã thêm **${track.title}** vào hàng đợi.`
+  });
+} catch (e) {
+  console.error('playsc URL error:', e);
+  return interaction.editReply({ content: '⚠️ Không thể phát link này. Thử link khác hoặc từ khoá.' });
+            }
+         }
+        
       // === TÌM KIẾM: lấy tối đa 20 kết quả để phân trang
       const term = query.trim().toLowerCase();
       const now = Date.now();

@@ -913,45 +913,82 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const msg = await channel.messages.fetch(s.msgId);
       await msg.edit({ embeds:[TX.render(interaction.guild.id)], components:[ s.locked ? TX.rowDisabled(s.roundId) : TX.row(s.roundId) ] });
     } catch {}
-  }
+        }
+
 // String select menu (SoundCloud chọn bài)
-  if (interaction.isStringSelectMenu()) {
-    try {
-      if (!interaction.customId.startsWith('sc_select|')) return;
-      const parts = interaction.customId.split('|');
-      const authorId = parts[1];
-      if (interaction.user.id !== authorId) return interaction.reply({ content:'⛔ Chỉ người yêu cầu mới chọn được bài này.', ephemeral:true });
+if (interaction.isStringSelectMenu()) {
+  try {
+    // Chỉ xử lý menu của SoundCloud
+    if (!interaction.customId.startsWith('sc_select|')) return;
 
-      const url = interaction.values?.[0];
-      if (!url) return interaction.reply({ content:'⚠️ Không nhận được URL bài hát.', ephemeral:true });
+    const parts = interaction.customId.split('|');
+    const authorId = parts[1];
 
-      // Update ngay để tránh timeout
-      await interaction.update({ content:'⏳ Đang thêm vào hàng đợi…', components:[] });
-
-      const q = await ensureConnected(interaction);
-      let title = 'SoundCloud Track';
-      try {
-        const info = await play.soundcloud(url).catch(() => null);
-        if (info) title = info.name || info.title || title;
-        else {
-          const sc = await scSearchTracks(url, 1).catch(() => []);
-          if (sc?.length) title = sc[0].title || sc[0].name || title;
-        }
-      } catch {}
-      q.queue.push({ title, url, by: interaction.user.tag });
-      if (q.player.state.status !== AudioPlayerStatus.Playing) await playNext(interaction.guildId);
-
-      return interaction.followUp({ content:`🎧 Đã thêm **${title}** vào hàng đợi.`, ephemeral:true });
-    } catch (e) {
-      console.error('SC select error:', e);
-      try {
-        if (interaction.deferred || interaction.replied) {
-          return await interaction.followUp({ content:'⚠️ Lỗi khi thêm bài từ SoundCloud.', ephemeral:true });
-        }
-        return await interaction.reply({ content:'⚠️ Lỗi khi thêm bài từ SoundCloud.', ephemeral:true });
-      } catch {}
+    // Chỉ người đã mở menu mới được chọn
+    if (interaction.user.id !== authorId) {
+      return interaction.reply({ content: '⚠️ Chỉ người yêu cầu mới chọn được bài này.', ephemeral: true });
     }
+
+    const url = interaction.values?.[0];
+    if (!url) {
+      return interaction.reply({ content: '⚠️ Không nhận được URL bài hát.', ephemeral: true });
+    }
+
+    // Update ngay để tránh timeout
+    await interaction.update({ content: '⏳ Đang thêm vào hàng đợi...', components: [] });
+
+    const q = await ensureConnected(interaction);
+    let title = 'SoundCloud Track';
+
+    try {
+      // Ưu tiên lấy metadata trực tiếp từ URL
+      const info = await play.soundcloud(url).catch(() => null);
+
+      if (info) {
+        title = info.name || info.title || title;
+        q.queue.push({
+          title,
+          url: info.url || url,
+          duration: info.durationInSec || 0,   // 👈 rất quan trọng cho /np & /seek
+          user: interaction.user.tag,
+        });
+      } else {
+        // Fallback: thử search lại 1 kết quả theo URL
+        const sc = await scSearchTracks(url, 1).catch(() => []);
+        if (sc && sc.length) {
+          const r = sc[0];
+          title = r.title || r.name || title;
+          q.queue.push({
+            title,
+            url: r.url || url,
+            duration: r.durationInSec || 0,    // 👈 giữ duration
+            user: interaction.user.tag,
+          });
+        } else {
+          return interaction.followUp({ content: '⚠️ Không lấy được thông tin bài hát.', ephemeral: true });
+        }
+      }
+
+      // Nếu player đang rảnh thì phát luôn
+      if (q.player.state.status !== AudioPlayerStatus.Playing) {
+        playNext(interaction.guildId);
+      }
+
+      return interaction.followUp({ content: `🎧 Đã thêm **${title}** vào hàng đợi.`, ephemeral: true });
+    } catch (e) {
+      console.error('SC select inner error:', e);
+      return interaction.followUp({ content: '⚠️ Lỗi khi thêm bài từ SoundCloud.', ephemeral: true });
+    }
+  } catch (e) {
+    console.error('SC select outer error:', e);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        return await interaction.followUp({ content: '⚠️ Lỗi khi thêm bài từ SoundCloud.', ephemeral: true });
+      }
+      return interaction.reply({ content: '⚠️ Lỗi khi thêm bài từ SoundCloud.', ephemeral: true });
+    } catch {}
   }
+}
 });
 
 // ------------------- slash handlers -------------------
@@ -1730,47 +1767,62 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       try { q.player?.state?.resource?.volume?.setVolume(q.volume); } catch {}
       return interaction.reply(`🔊 Âm lượng: **${p}%**`);
     }
-    if (interaction.commandName === 'seek') {
+    // == /seek: tua bài đang phát ==
+if (interaction.commandName === 'seek') {
   const q = getQ(interaction.guildId);
   if (!q || !q.now || !q.player) {
-    return interaction.reply({ content: '❌ Không có bài nào đang phát để tua.', ephemeral: true });
+    return interaction.reply({ content: '🤷 Không có bài nào đang phát để tua.', ephemeral: true });
   }
 
-  // lấy số giây người dùng nhập
-  const seconds = interaction.options.getInteger('seconds', true);
-  if (seconds < 0) {
-    return interaction.reply({ content: '❌ Thời gian phải ≥ 0 giây.', ephemeral: true });
-  }
+  // Lấy tham số giây và chuẩn hoá
+  let seconds = interaction.options.getInteger('seconds', true);
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+
+  // Giới hạn theo tổng thời lượng (nếu biết)
+  const dur = Number(q.now.duration || 0);
+  if (dur && seconds >= dur) seconds = Math.max(0, dur - 1);
 
   try {
-    await interaction.deferReply({ ephemeral: true });
+    const currentUrl = q?.now?.url;
+    if (!currentUrl) {
+      return interaction.reply({ content: '❌ Không xác định được URL bài hiện tại để tua.', ephemeral: true });
+    }
 
-    // Dừng resource hiện tại (không destroy connection)
-    try { q.player.stop(true); } catch {}
+    // Dừng phát hiện tại (nếu đang phát)
+    try { q.player.stop(); } catch {}
 
-    // Tạo lại stream từ URL hiện tại, có seek
-    // play-dl sẽ chọn đúng nguồn (SC/YT) và áp dụng tua
-    const s = await play.stream(q.now.url, { seek: seconds });
-
-    // Tạo resource mới từ stream trên
-    const resource = createAudioResource(s.stream, {
-      inputType: s.type,            // quan trọng: đúng codec/loại stream
-      inlineVolume: true,
-    });
-
-    q.player.play(resource);
-
-    await interaction.editReply(`⏩ Đã tua đến **${seconds} giây** trong bài **${q.now.title}**.`);
-  } catch (err) {
-    console.error('Seek error:', err);
-    // Thử phát lại resource cũ nếu cần (tránh đứng im)
+    // Thử native seek trước
+    let s = null;
     try {
-      const s0 = await play.stream(q.now.url);
-      const r0 = createAudioResource(s0.stream, { inputType: s0.type, inlineVolume: true });
-      q.player.play(r0);
+      s = await play.stream(currentUrl, { seek: seconds });
     } catch {}
 
-    await interaction.editReply({ content: '❌ Tua bị lỗi. Thử lại sau nhé.' });
+    if (s && s.stream) {
+      const res = createAudioResource(s.stream, { inputType: s.type, inlineVolume: true });
+      q.player.play(res);
+    } else {
+      // Fallback: dùng ffmpeg -ss
+      const res = createAudioResource(currentUrl, {
+        inlineVolume: true,
+        ffmpeg: { before_options: `-ss ${seconds}` },
+      });
+      q.player.play(res);
+    }
+
+    return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${q.now.title || '—'}**`);
+  } catch (err) {
+    console.error('Seek error:', err);
+
+    // Phục hồi phát lại resource cũ để tránh im lặng
+    try {
+      const back = await play.stream(q?.now?.url || '').catch(() => null);
+      if (back?.stream) {
+        const r0 = createAudioResource(back.stream, { inputType: back.type, inlineVolume: true });
+        q.player.play(r0);
+      }
+    } catch {}
+
+    return interaction.reply({ content: '❌ Tua bị lỗi. Thử lại sau nhé.', ephemeral: true });
   }
 }
     

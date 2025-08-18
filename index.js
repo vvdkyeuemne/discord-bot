@@ -2083,34 +2083,6 @@ client.on('interactionCreate', async (interaction) => {
 
 
 
-// ========================= TikTok AUTO – SETTINGS =========================
-const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
-let tiktokSettings = { guilds: {} };
-
-async function loadTikTokSettings() {
-  try {
-    const raw = await fs.readFile(TIKTOK_SETTINGS_FILE, "utf8");
-    tiktokSettings = JSON.parse(raw || "{}") || { guilds: {} };
-  } catch {
-    tiktokSettings = { guilds: {} };
-  }
-}
-async function saveTikTokSettings() {
-  await fs.writeFile(TIKTOK_SETTINGS_FILE, JSON.stringify(tiktokSettings, null, 2));
-}
-// gọi lúc bot online (nếu bạn có client.once('ready', ...) thì thêm dòng này trong ready):
-loadTikTokSettings().catch(() => {});
-
-// Auto có bật cho message này không?
-function isTikTokAutoEnabledForMessage(msg) {
-  if (!msg.guildId) return false;             // DM: không auto
-  const g = tiktokSettings.guilds[msg.guildId];
-  if (!g || g.mode === "off") return false;   // tắt
-  if (g.mode === "server") return true;       // toàn server
-  if (g.mode === "channel") return msg.channelId === g.channelId; // chỉ kênh đã set
-  return false;
-}
-
 // ====================== HÀM CHUNG: lấy dữ liệu & build kết quả ======================
 async function fetchTikTokPayload(inputUrlRaw) {
   // 1) Làm sạch & bắt URL

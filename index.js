@@ -593,27 +593,27 @@ const commands = [
     .addSubcommand(s=>s.setName('cancel').setDescription('Hủy ván hiện tại (admin)')),
 
   new SlashCommandBuilder()
-  .setName('tiktok')
-  .setDescription('Tải video TikTok từ link')
-  .addStringOption(o => 
+    .setName('tiktok')
+    .setDescription('Tải video TikTok từ link')
+    .addStringOption(o =>
     o.setName('url')
-     .setDescription('Dán link TikTok vào đây')
-     .setRequired(true)
-    )
+    .setDescription('Dán link TikTok vào đây')
+    .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-  .setName('tiktokauto')
-  .setDescription('Bật/tắt TikTok Auto trong server')
-  .addStringOption(o =>
+    .setName('tiktokauto')
+    .setDescription('Bật/tắt chế độ tự động xử lý link TikTok trong server/kênh')
+    .addStringOption(o =>
     o.setName('mode')
-      .setDescription('Chế độ: off / server / channel')
-      .setRequired(true)
-      .addChoices(
-        { name: 'off (tắt)', value: 'off' },
-        { name: 'server (toàn server)', value: 'server' },
-        { name: 'channel (chỉ kênh hiện tại)', value: 'channel' },
-      )                 
-  ),
+    .setDescription('Chọn chế độ auto')
+    .setRequired(true)
+    .addChoices(
+    { name: 'off (tắt)', value: 'off' },
+    { name: 'server (toàn server)', value: 'server' },
+    { name: 'channel (chỉ kênh hiện tại)', value: 'channel' }
+        )
+    ),
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------

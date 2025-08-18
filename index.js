@@ -1774,50 +1774,57 @@ if (interaction.commandName === 'seek') {
     return interaction.reply({ content: '🤷 Không có bài nào đang phát để tua.', ephemeral: true });
   }
 
-  // Lấy tham số giây và chuẩn hoá
+  // seconds hợp lệ
   let seconds = interaction.options.getInteger('seconds', true);
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
 
-  // Giới hạn theo tổng thời lượng (nếu biết)
+  // giới hạn theo tổng thời lượng (nếu biết)
   const dur = Number(q.now.duration || 0);
   if (dur && seconds >= dur) seconds = Math.max(0, dur - 1);
 
   try {
-    const currentUrl = q?.now?.url;
-    if (!currentUrl) {
+    // 👉 Cache thông tin hiện tại trước khi stop
+    const current = {
+      url: q.now?.url || null,
+      title: q.now?.title || '—',
+    };
+    if (!current.url) {
       return interaction.reply({ content: '❌ Không xác định được URL bài hiện tại để tua.', ephemeral: true });
     }
 
-    // Dừng phát hiện tại (nếu đang phát)
+    // dừng phát (an toàn)
     try { q.player.stop(); } catch {}
 
-    // Thử native seek trước
+    // thử native seek trước
     let s = null;
     try {
-      s = await play.stream(currentUrl, { seek: seconds });
+      s = await play.stream(current.url, { seek: seconds });
     } catch {}
 
     if (s && s.stream) {
       const res = createAudioResource(s.stream, { inputType: s.type, inlineVolume: true });
+      if (q.volume != null && res.volume) res.volume.setVolume(q.volume);
       q.player.play(res);
     } else {
-      // Fallback: dùng ffmpeg -ss
-      const res = createAudioResource(currentUrl, {
+      // fallback: ffmpeg -ss
+      const res = createAudioResource(current.url, {
         inlineVolume: true,
         ffmpeg: { before_options: `-ss ${seconds}` },
       });
+      if (q.volume != null && res.volume) res.volume.setVolume(q.volume);
       q.player.play(res);
     }
 
-    return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${q.now.title || '—'}**`);
+    return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${current.title}**`);
   } catch (err) {
     console.error('Seek error:', err);
 
-    // Phục hồi phát lại resource cũ để tránh im lặng
+    // phục hồi phát lại để tránh im lặng
     try {
       const back = await play.stream(q?.now?.url || '').catch(() => null);
       if (back?.stream) {
         const r0 = createAudioResource(back.stream, { inputType: back.type, inlineVolume: true });
+        if (q.volume != null && r0.volume) r0.volume.setVolume(q.volume);
         q.player.play(r0);
       }
     } catch {}

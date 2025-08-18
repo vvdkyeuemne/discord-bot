@@ -599,6 +599,7 @@ const commands = [
     o.setName('url')
      .setDescription('Dán link TikTok vào đây')
      .setRequired(true)
+    )
 
   new SlashCommandBuilder()
   .setName('tiktokauto')

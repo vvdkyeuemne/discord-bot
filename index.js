@@ -617,7 +617,7 @@ const commands = [
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
-const GUILD_IDS = ['1403572945389097050','1329819713450278952'];
+const GUILD_IDS = ['1403572945389097050','1329819713450278952','1405161470055940186'];
 async function registerCommandsForGuilds(){
   const rest = new REST({ version:'10' }).setToken(process.env.TOKEN);
   try { await rest.put(Routes.applicationCommands(client.user.id), { body: [] }); } catch(e){ console.warn('clear global failed:', e?.message); }

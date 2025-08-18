@@ -1774,85 +1774,97 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
   }
 }
     
-    // MUSIC (SoundCloud) — phân trang + meta + plays/likes + 5 ảnh
-    if (interaction.commandName === 'playsc') {
-      const query = interaction.options.getString('query', true);
-      await interaction.deferReply({ ephemeral: true });
+ // MUSIC (SoundCloud) – phát trực tiếp URL + tìm kiếm
+if (interaction.commandName === 'playsc') {
+  const query = interaction.options.getString('query', true);
+  await interaction.deferReply({ ephemeral: true });
 
-      // Nếu là URL SoundCloud -> phát trực tiếp
-      if (/^https?:\/\/(on\.)?soundcloud\.com\//i.test(query)) {
-        try {
-          const q = await ensureConnected(interaction);
-          let title = 'SoundCloud Track';
-         try {
-  const info = await play.soundcloud(query).catch(() => null);
-  if (!info) return interaction.editReply({ content: "❌ Không tìm thấy bài." });
+  // ===== CASE A: URL SoundCloud -> phát trực tiếp
+  if (/^https?:\/\/(on\.)?soundcloud\.com\/\S+/i.test(query)) {
+    try {
+      const q = await ensureConnected(interaction);
 
-  const track = {
-    title: info.name || info.title,
-    url: info.url,
-    duration: info.durationInSec || 0,   // 👈 thêm thời lượng
-    user: interaction.user.username
-  };
+      const info = await play.soundcloud(query).catch(() => null);
+      if (!info) {
+        return interaction.editReply({ content: '❌ Không tìm thấy bài.' });
+      }
 
-  q.queue.push(track);
+      // track đưa vào hàng đợi (NHỚ có duration để /np và /seek dùng)
+      const track = {
+        title: info.name || info.title,
+        url: info.url || query,
+        duration: info.durationInSec || 0,
+        user: interaction.user.username,
+      };
 
-  if (q.player.state.status !== AudioPlayerStatus.Playing) {
-    playNext(interaction.guildId);
+      q.queue.push(track);
+      if (q.player.state.status !== AudioPlayerStatus.Playing) {
+        playNext(interaction.guildId);
+      }
+
+      return interaction.editReply({ content: `🎧 Đã thêm **${track.title}** vào hàng đợi.` });
+    } catch (e) {
+      console.error('playsc URL error:', e);
+      return interaction.editReply({ content: '⚠️ Không thể phát link này. Thử link khác hoặc từ khoá.' });
+    }
   }
 
-  await interaction.editReply({
-    content: `🎧 Đã thêm **${track.title}** vào hàng đợi.`
-  });
-} catch (e) {
-  console.error('playsc URL error:', e);
-  return interaction.editReply({ content: '⚠️ Không thể phát link này. Thử link khác hoặc từ khoá.' });
-            }
-         }
-        
-      // === TÌM KIẾM: lấy tối đa 20 kết quả để phân trang
-      const term = query.trim().toLowerCase();
-      const now = Date.now();
-      let cached = scSearchCache.get(term);
-      let results;
+  // ===== CASE B: TÌM KIẾM (trả về danh sách chọn)
+  try {
+    const term = query.trim().toLowerCase();
+    const now = Date.now();
+    const cached = scSearchCache.get(term);
+    let results;
 
-      const stillValid = cached && (now - cached.time < SC_CACHE_TTL) && Array.isArray(cached.results) && cached.results.length;
-      if (stillValid) {
-        results = cached.results;
-        console.log('🎵 SoundCloud search dùng cache cho:', term);
-      } else {
-        try {
-          const found = await scSearchTracks(term, 20);
-          results = (found || []).map(r => ({
-            title: (r.title || r.name || 'Bài không tên'),
-            url: r.url,
-            desc: String(pickUploader(r)),
-            cover: pickCover(r) || null,
-            durationSec: r.durationInSec ?? null,
-            bpm: r.bpm ?? null,
-            plays: r.playback_count ?? r.playCount ?? null,
-            likes: r.likes_count ?? r.likes ?? null,
-          })).filter(x => x.url);
-          if (results.length) scSearchCache.set(term, { time: now, results });
-        } catch (e) {
-          console.error('playsc search error:', e);
-          return interaction.editReply({ content:'⚠️ Lỗi tìm kiếm SoundCloud. Thử lại sau nhé.' });
-        }
+    const stillValid =
+      cached &&
+      (now - cached.time < SC_CACHE_TTL) &&
+      Array.isArray(cached.results) &&
+      cached.results.length;
+
+    if (stillValid) {
+      results = cached.results;
+      console.log('🎵 SoundCloud search dùng cache cho:', term);
+    } else {
+      const found = await scSearchTracks(term, 20);
+      results = (found || [])
+        .map(r => ({
+          title: r.title || r.name || 'Bài không tên',
+          url: r.url,
+          desc: String(pickUploader(r)),
+          cover: pickCover(r) || null,
+          durationSec: r.durationInSec ?? null, // giữ duration để handler pick dùng
+          bpm: r.bpm ?? null,
+          plays: r.playback_count ?? r.playCount ?? null,
+          likes: r.likes_count ?? r.likes ?? null,
+        }))
+        .filter(x => x.url);
+
+      if (results.length) {
+        scSearchCache.set(term, { time: now, results });
       }
-
-      if (!results || !results.length) {
-        return interaction.editReply({ content:'🤷 Không tìm thấy bài phù hợp.' });
-      }
-
-      // Lưu store theo nonce để phân trang
-      const nonce = interaction.id;
-      scSearchStore.set(nonce, { authorId: interaction.user.id, results, time: Date.now() });
-      setTimeout(() => scSearchStore.delete(nonce), SC_STORE_TTL);
-
-      // Render trang đầu
-      const view = await renderSCPage(nonce, 0);
-      return interaction.editReply(view);
     }
+
+    if (!results || !results.length) {
+      return interaction.editReply({ content: '🙁 Không tìm thấy bài phù hợp.' });
+    }
+
+    // Lưu store theo nonce để phân trang/chọn
+    const nonce = interaction.id;
+    scSearchStore.set(nonce, {
+      authorId: interaction.user.id,
+      results,
+      time: Date.now(),
+    });
+    setTimeout(() => scSearchStore.delete(nonce), SC_STORE_TTL);
+
+    const view = await renderSCPage(nonce, 0);
+    return interaction.editReply(view);
+  } catch (e) {
+    console.error('playsc search error:', e);
+    return interaction.editReply({ content: '⚠️ Lỗi tìm kiếm SoundCloud. Thử lại sau nhé.' });
+  }
+        }   
 
     // botstats
     if (interaction.commandName === 'botstats') {

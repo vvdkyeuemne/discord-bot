@@ -96,6 +96,38 @@ let welcomes = {};
 const COIN_FILE = path.join(process.cwd(), 'coins.json');
 let coins = {};
 
+// === TikTok auto settings (JSON) ===
+const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
+let tiktokSettings = { guilds: {} };
+
+// Load file JSON tiktok-settings.json
+async function loadTikTokSettings() {
+  try {
+    const raw = await fs.readFile(TIKTOK_SETTINGS_FILE, "utf8");
+    tiktokSettings = JSON.parse(raw || "{}") || { guilds: {} };
+  } catch {
+    tiktokSettings = { guilds: {} };
+  }
+}
+
+// Lưu file JSON tiktok-settings.json
+async function saveTikTokSettings() {
+  await fs.writeFile(
+    TIKTOK_SETTINGS_FILE,
+    JSON.stringify(tiktokSettings, null, 2)
+  );
+}
+
+// Kiểm tra 1 message có cần auto xử lý TikTok không
+function isTikTokAutoEnabledForMessage(msg) {
+  if (!msg.guildId) return false; 
+  const g = tiktokSettings.guilds[msg.guildId];
+  if (!g || g.mode === "off") return false;
+  if (g.mode === "server") return true;
+  if (g.mode === "channel") return msg.channelId === g.channelId;
+  return false;
+  }
+
 // extend loaders to include coins
 async function saveCoins(){ await saveJsonSafe(COIN_FILE, coins); }
 
@@ -567,6 +599,19 @@ const commands = [
     o.setName('url')
      .setDescription('Dán link TikTok vào đây')
      .setRequired(true)
+
+  new SlashCommandBuilder()
+  .setName('tiktokauto')
+  .setDescription('Bật/tắt TikTok Auto trong server')
+  .addStringOption(o =>
+    o.setName('mode')
+      .setDescription('Chế độ: off / server / channel')
+      .setRequired(true)
+      .addChoices(
+        { name: 'off (tắt)', value: 'off' },
+        { name: 'server (toàn server)', value: 'server' },
+        { name: 'channel (chỉ kênh hiện tại)', value: 'channel' },
+      )                 
   ),
 ].map(c=>c.toJSON());
 

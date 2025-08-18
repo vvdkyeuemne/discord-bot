@@ -272,13 +272,34 @@ async function ensureConnected(interaction){
     } catch {}
   }
 
-  // Logs chẩn đoán
-  q.player.on('stateChange', (o,n)=> console.log('🎧 Player:', o.status, '->', n.status));
-  q.connection.on('stateChange', (o,n)=> console.log('🔌 Conn:', o.status, '->', n.status));
-  q.player.on('error', e => { console.error('Player error:', e); playNext(interaction.guildId); });
-  q.connection.on('stateChange', (_o,n)=>{ if(n.status===VoiceConnectionStatus.Disconnected){ try{ q.connection.destroy(); }catch{} music.delete(interaction.guildId);} });
+  // Logs chẩn đoán (gộp gọn, tránh đăng ký trùng)
+q.player.on('stateChange', (oldState, newState) => {
+  console.log('🎧 Player:', oldState.status, '->', newState.status);
+});
 
-  return q;
+// Khi player phát xong (Idle) thì tự qua bài kế tiếp
+q.player.on(AudioPlayerStatus.Idle, () => {
+  try { playNext(interaction.guildId); } catch (e) { console.error('Idle→playNext error:', e); }
+});
+
+// Nếu player lỗi thì cũng nhảy tiếp bài
+q.player.on('error', (err) => {
+  console.error('Player error:', err);
+  try { playNext(interaction.guildId); } catch (e) { console.error('Error→playNext error:', e); }
+});
+
+// Log trạng thái connection & dọn dẹp khi rớt kết nối
+q.connection.on('stateChange', (oldState, newState) => {
+  console.log('🔌 Conn:', oldState.status, '->', newState.status);
+
+  // Nếu bị disconnect thì hủy connection và xóa queue của guild
+  if (newState.status === VoiceConnectionStatus.Disconnected) {
+    try { q.connection.destroy(); } catch {}
+    music.delete(interaction.guildId);
+  }
+});
+
+return q;
 }
 
 function isSCAuthError(err) {

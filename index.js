@@ -2736,30 +2736,37 @@ async function fetchTikTokUserInfo(username) {
     region:     user.region || user.country || root.region || root.country || '—',
   };
 }
-// Fallback: cố lấy avatar trực tiếp từ trang profile TikTok (qua proxy r.jina.ai)
+// Fallback: lấy avatar qua các nguồn công khai (ưu tiên ổn định)
 async function resolveTikTokAvatar(u) {
   try {
+    // 1) Nếu API đã có ảnh hợp lệ thì dùng luôn
     if (u?.avatar && /^https?:\/\//.test(u.avatar)) return u.avatar;
 
-    const uname = u?.uniqueId || u?.username;
+    const uname = (u?.uniqueId || u?.username || '').trim();
     if (!uname) return null;
 
-    const url = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
+    // 2) unavatar.io — ổn định, không cần token
+    const unavatar = `https://unavatar.io/tiktok/${encodeURIComponent(uname)}`;
+    try {
+      const head = await fetch(unavatar, { method: 'HEAD' });
+      const ok   = head.ok && String(head.headers.get('content-type') || '').startsWith('image/');
+      if (ok) return unavatar;
+    } catch {}
+
+    // 3) Fallback cuối: quét meta TikTok
+    const url  = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
     const html = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' } })
-      .then(r => r.text()).catch(() => null);
+                  .then(r => r.text()).catch(() => null);
     if (!html) return null;
 
-    let m = /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i.exec(html);
-    if (!m) {
-      m = /"avatarThumb"\s*:\s*"([^"]+)"/i.exec(html);
-    }
+    let m = /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i.exec(html)
+         || /"avatarThumb"\s*:\s*"([^"]+)"/i.exec(html);
     if (m && m[1]) {
       return m[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
     }
   } catch {}
   return null;
 }
-
 
 // utils: format số với dấu phân cách ngàn
 function fmtNum(n) {

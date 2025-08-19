@@ -2107,71 +2107,49 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
-  // --- /fb ---
+ // === /fb: tải video/ảnh Facebook ===
 if (interaction.commandName === 'fb') {
-  const link = interaction.options.getString('url', true).trim();
+  const raw = interaction.options.getString('url', true);
+  const link = (raw || '').trim();
   await interaction.deferReply(); // cho bot thời gian xử lý
 
   try {
     const urls = await fetchFacebookMedia(link);
-    if (!urls.length) {
-      return interaction.editReply({
-        content: '⚠️ Không lấy được link… Hãy chắc link **public** hoặc thử link khác nhé.'
-      });
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return interaction.editReply({ content: '⚠️ Không lấy được link tải từ bài viết này. Hãy chắc là bài viết public hoặc thử link khác nhé.' });
     }
 
-    // Tách mp4 / ảnh + sắp xếp chất lượng
-    const mp4s = urls.filter(u => /\.mp4/i.test(u.url));
-    const score = (u) => {
-      const q = /(1080|720|640|540|480)/.exec(u.url)?.[1] ?? '';
-      return ({ '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 }[q] || 0);
-    };
-    mp4s.sort((a, b) => score(b) - score(a));
+    // Chọn 1 link tốt nhất để gửi file (tránh gửi 2 lần)
+    const best = urls.find(u => u && /\.mp4/i.test(u.url)) || urls[0];
+    if (!best || !best.url || !/^https?:\/\//i.test(best.url)) {
+      return interaction.editReply({ content: '⚠️ Không tìm thấy file trực tiếp hợp lệ.' });
+    }
 
-    const best = mp4s[0] || urls[0]; // ưu tiên mp4 cao nhất, không có thì lấy phần tử đầu
-    const firstImage = urls.find(u => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(u.url));
-
-    // ==== EMBED (gửi TRƯỚC) ====
+    // 1) Gửi EMBED trước
     const embed = new EmbedBuilder()
-      .setColor(0x2b88d9)
+      .setColor(0x1877F2)
       .setTitle('📥 Facebook Downloader')
-      .setURL(link)
       .setDescription('✅ Tải thành công!')
-      .setFooter({ text: 'Nguồn: Facebook Public Post' })
-      .setTimestamp(new Date());
+      .setFooter({ text: `Nguồn: Facebook Public Post | Hôm nay lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
+    await interaction.editReply({ embeds: [embed] });
 
-    if (firstImage) embed.setImage(firstImage.url); // thumbnail cho video
+    // 2) Sau đó mới gửi FILE (để hiện embed trước, tùy chọn chèn delay nhẹ)
+    const file = {
+      attachment: best.url,
+      name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
+    };
 
-    // Nút chọn chất lượng (tối đa 3)
-    const buttons = mp4s.slice(0, 3).map(u => {
-      const q = /(1080|720|640|540|480)/.exec(u.url)?.[1] ?? 'MP4';
-      return new ButtonBuilder()
-        .setLabel(`${q}p`)
-        .setStyle(ButtonStyle.Link)
-        .setURL(u.url);
-    });
-
-    const components = buttons.length
-      ? [new ActionRowBuilder().addComponents(...buttons)]
-      : [];
-
-    // GỬI EMBED TRƯỚC
-    await interaction.editReply({ embeds: [embed], components });
-
-    // ==== GỬI FILE SAU ====
-    if (best?.url?.startsWith('http')) {
-      await interaction.followUp({
-        files: [{
-          attachment: best.url,
-          name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
-        }]
+    // Nếu muốn chắc chắn embed render xong rồi mới có file, có thể delay 400–600ms
+    setTimeout(() => {
+      interaction.followUp({ files: [file] }).catch(err => {
+        console.error('fb followUp error:', err);
       });
-    }
+    }, 500);
 
   } catch (e) {
     console.error('fb handler error:', e);
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply('⚠️ Lỗi khi xử lý link Facebook.');
+      await interaction.editReply({ content: '⚠️ Lỗi khi xử lý link Facebook.' });
     } else {
       await interaction.reply({ content: '⚠️ Lỗi khi xử lý link Facebook.', ephemeral: true });
     }

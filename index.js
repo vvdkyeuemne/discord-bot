@@ -2743,37 +2743,42 @@ async function fetchTikTokUserInfo(username) {
 // Fallback: cố lấy khu vực (region/country) từ profile TikTok
 async function resolveTikTokRegion(u) {
   try {
-    // 1) Nếu API đã có sẵn thì dùng luôn
+    // 1) API đã có -> dùng luôn
     const have = (u?.region || u?.country || '').toString().trim();
     if (have) return prettyCountry(have);
 
-    // 2) Đọc HTML profile qua proxy r.jina.ai rồi bắt pattern
     const uname = (u?.uniqueId || u?.username || '').trim();
     if (!uname) return '';
 
-    const url  = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
-    const html = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' } })
-                  .then(r => r.text()).catch(() => null);
+    // 2) Lấy HTML qua proxy
+    const url = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
+    const html = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (DiscordBot)',
+        'Accept-Language': 'vi,en;q=0.8'
+      }
+    }).then(r => r.text()).catch(() => null);
     if (!html) return '';
 
-    // Thử nhiều khả năng: region, country, country_code, og:locale, và location dạng chữ
+    // 3) Thử thật nhiều key thường gặp
     let m =
       /"region"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
       /"country"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
+      /"countryCode"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
       /"country_code"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
+      /"regionCode"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
       /property=["']og:locale["'][^>]+content=["'][a-z]{2}[-_]?([A-Za-z]{2})["']/i.exec(html);
 
-    if (m && m[1]) {
-      return prettyCountry(m[1]); // là mã 2 chữ
-    }
+    if (m && m[1]) return prettyCountry(m[1].toUpperCase());
 
-    // Fallback cuối: "location":"Vietnam" (trả nguyên tên nếu có)
-    const mLoc = /"location"\s*:\s*"([^"]+)"/i.exec(html);
+    // 4) Fallback: chuỗi location dạng chữ
+    const mLoc =
+      /"location"\s*:\s*"([^"]+)"/i.exec(html) ||
+      /"country_name"\s*:\s*"([^"]+)"/i.exec(html);
     if (mLoc && mLoc[1]) {
       const loc = mLoc[1].trim();
-      // nếu loc là mã 2 chữ thì prettify, còn lại trả nguyên
-      if (/^[A-Za-z]{2}$/.test(loc)) return prettyCountry(loc);
-      return loc;
+      // nếu là mã 2 chữ -> chuẩn hoá, nếu là tên -> trả tên
+      return /^[A-Za-z]{2}$/.test(loc) ? prettyCountry(loc) : loc;
     }
 
     return '';

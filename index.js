@@ -2108,41 +2108,32 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
   if (interaction.commandName === 'fb') {
-  const input = interaction.options.getString('url', true).trim();
+  const link = interaction.options.getString('url', true).trim();
+  await interaction.deferReply(); // có thời gian tải
 
-  await interaction.deferReply(); // public reply
+  try {
+    const urls = await fetchFacebookMedia(link);
+    console.log("FB urls:", urls);
 
-  // Gọi utils để lấy link tải
-  const items = await fetchFacebookMedia(input);
+    if (!urls.length) {
+      return interaction.editReply('⚠️ Không lấy được link tải từ bài viết này. Hãy chắc link **public** hoặc thử link khác nhé.');
+    }
 
-  if (!items.length) {
-    return interaction.editReply('⚠️ Không lấy được link tải từ bài viết này. Hãy chắc là bài viết **public** hoặc thử link khác nhé.');
+    // Gửi 1–2 file đầu (Discord giới hạn ~25MB ở free plan)
+    const files = urls.slice(0, 2).map((u, i) => ({
+      attachment: u,
+      name: /\.mp4/i.test(u) ? `facebook_${i + 1}.mp4` : `facebook_${i + 1}.jpg`,
+    }));
+
+    await interaction.editReply({ content: '✅ Lấy link thành công:', files });
+  } catch (e) {
+    console.error("fb handler error:", e);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('⚠️ Lỗi khi xử lý link Facebook.');
+    } else {
+      await interaction.reply({ content: '⚠️ Lỗi khi xử lý link Facebook.', ephemeral: true });
+    }
   }
-
-  // Tạo tối đa 5 nút link tải (ưu tiên video HD, sau đó ảnh)
-  const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = await import('discord.js');
-
-  const embed = new EmbedBuilder()
-    .setColor(0x1877F2) // màu FB
-    .setTitle('Tải Facebook')
-    .setURL(input)
-    .setDescription('Chọn chất lượng/định dạng để tải.')
-    .setTimestamp(new Date());
-
-  // Tạo các button link (tối đa 5)
-  const buttons = items.slice(0, 5).map((it, idx) =>
-    new ButtonBuilder()
-      .setStyle(ButtonStyle.Link)
-      .setLabel(it.label?.slice(0, 80) || `Link ${idx + 1}`)
-      .setURL(it.url)
-  );
-
-  const rows = [];
-  for (let i = 0; i < buttons.length; i += 5) {
-    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-  }
-
-  return interaction.editReply({ embeds: [embed], components: rows });
 }
 });
 
@@ -2893,14 +2884,19 @@ function fmtNum(n) {
     return String(n ?? 0);
   }
     }
-// === utils: lấy link tải FB qua fsave.net + parse bằng cheerio ===
+// === utils: lấy link tải FB qua fsave.net (hỗ trợ JSON hoặc HTML) ===
 async function fetchFacebookMedia(fbUrl) {
   try {
-    const urlOk = String(fbUrl || '').trim();
-    if (!/^https?:\/\//i.test(urlOk)) return [];
+    // chuẩn hoá link
+    let urlOk = String(fbUrl || '').trim();
+    try { urlOk = decodeURIComponent(urlOk); } catch {}
+    if (!/^https?:\/\/\S+/i.test(urlOk)) return [];
 
-    // POST tới fsave.net/proxy.php như lúc bạn bắt được trên DevTools
-    const body = new URLSearchParams({ url: urlOk }).toString();
+    // m. -> www. cho ổn định
+    urlOk = urlOk.replace(/^https?:\/\/m\.facebook\.com/i, 'https://www.facebook.com');
+
+    // POST tới fsave proxy (đã bắt bằng DevTools)
+    const body = new URLSearchParams({ url: urlOk, lang: 'vi' }).toString();
 
     const res = await axios.post(
       'https://fsave.net/proxy.php',
@@ -2912,33 +2908,76 @@ async function fetchFacebookMedia(fbUrl) {
           'referer': 'https://fsave.net/vi',
           'user-agent': 'Mozilla/5.0 (DiscordBot)'
         },
-        timeout: 15000
+        timeout: 15000,
+        maxRedirects: 3,
+        validateStatus: () => true
       }
     );
 
-    // Trả về có thể là HTML hoặc JSON chứa HTML
-    const html = typeof res.data === 'string'
-      ? res.data
-      : (res.data?.html || '');
+    // FSave có khi trả HTML string, có khi trả JSON (chứa html hoặc data)
+    let payload = res?.data;
+
+    // Nếu là object -> thử gom link trực tiếp từ JSON
+    const outFromJSON = [];
+    const pushUrl = (u) => {
+      if (!u || typeof u !== 'string') return;
+      const href = u.trim();
+      // chấp nhận fbcdn/scontent/fcontent hoặc đuôi mp4/jpg/png
+      const ok =
+        /^https?:\/\/[^ ]+fbcdn\.net\/.+/i.test(href) ||
+        /^https?:\/\/[^ ]+scontent[^ ]*\.xx\.fbcdn\.net\/.+/i.test(href) ||
+        /^https?:\/\/s\d+\.fcontent\.app\/.+/i.test(href) ||
+        /^https?:\/\/.+\.(mp4|jpg|jpeg|png|webp)(\?|$)/i.test(href);
+      if (!ok) return;
+      outFromJSON.push({ url: href, label: normalizeLabel('', href) });
+    };
+
+    const walk = (node) => {
+      if (!node) return;
+      if (typeof node === 'string') pushUrl(node);
+      else if (Array.isArray(node)) node.forEach(walk);
+      else if (typeof node === 'object') {
+        for (const v of Object.values(node)) walk(v);
+      }
+    };
+
+    if (payload && typeof payload === 'object') {
+      // một số bản trả { html: "..."}; 1 số bản trả {data:{links:[...]}} v.v.
+      walk(payload);
+      if (outFromJSON.length) {
+        // dedup + sort như cũ
+        const dedup = [...new Map(outFromJSON.map(o => [o.url, o])).values()];
+        dedup.sort((a, b) => scoreLabel(b.label) - scoreLabel(a.label));
+        return dedup;
+      }
+    }
+
+    // Nếu là string => coi như HTML (hoặc object có field html)
+    const html =
+      typeof payload === 'string'
+        ? payload
+        : (payload && typeof payload.html === 'string' ? payload.html : '');
 
     if (!html) return [];
 
-    // Parse các link tải (video/ảnh) từ HTML
-    const $ = cheerio.load(html);
+    // Parse các link tải (video/ảnh) từ HTML bằng cheerio
+    const $ = cheerioLoad(html);
     const out = [];
 
-    // 1) Bắt các <a> có href trỏ đến fbcdn/scontent/fcontent (video, ảnh)
+    // Bắt <a href="...">
     $('a[href]').each((_, a) => {
-      const href = ($(a).attr('href') || '').trim();
-      const label = ($(a).text() || '').replace(/\s+/g, ' ').trim();
+      const href = String($(a).attr('href') || '').trim();
+      const labelRaw = ($(a).text() || '').replace(/\s+/g, ' ').trim();
+      if (!/^https?:\/\/\S+/i.test(href)) return;
 
-      if (!/^https?:\/\//i.test(href)) return;
-
-      // Chỉ nhận các host thường thấy của link tải
-      if (/(fbcdn\.net|scontent|fcontent\.app)/i.test(href)) {
+      // chỉ nhận các host/link thường thấy của link tải
+      if (
+        /(fbcdn\.net|scontent|fcontent\.app)/i.test(href) ||
+        /\.(mp4|jpg|jpeg|png|webp)(\?|$)/i.test(href)
+      ) {
         out.push({
           url: href,
-          label: normalizeLabel(label, href)
+          label: normalizeLabel(labelRaw, href)
         });
       }
     });
@@ -2956,29 +2995,26 @@ async function fetchFacebookMedia(fbUrl) {
   }
 }
 
-// chuẩn hóa label cho dễ đọc
+// === chuẩn hoá label (giữ như cũ của bạn, hoặc dán nếu chưa có) ===
 function normalizeLabel(label, href) {
-  if (/\.mp4(?:$|\?)/i.test(href)) {
-    // thử bóc độ phân giải
+  if (/\.mp4(?:\?|$)/i.test(href)) {
     if (/1080|FHD/i.test(label)) return 'Video MP4 1080p';
-    if (/720/i.test(label))      return 'Video MP4 720p';
-    if (/540/i.test(label))      return 'Video MP4 540p';
-    if (/480/i.test(label))      return 'Video MP4 480p';
-    return label || 'Video MP4';
+    if (/720/i.test(label)) return 'Video MP4 720p';
+    if (/540/i.test(label)) return 'Video MP4 540p';
+    if (/480/i.test(label)) return 'Video MP4 480p';
+    return 'Video MP4';
   }
-  if (/\.(jpe?g|png|webp)(?:$|\?)/i.test(href)) {
-    return label || 'Ảnh';
-  }
+  if (/\.(jpe?g|png|webp)(?:\?|$)/i.test(href)) return label || 'Ảnh';
   return label || 'Tải về';
 }
 
-// chấm điểm label để sort
+// === chấm điểm để sort (giữ như cũ của bạn, hoặc dán nếu chưa có) ===
 function scoreLabel(label = '') {
   let s = 0;
   if (/video|mp4/i.test(label)) s += 50;
-  if (/1080|FHD/i.test(label))  s += 30;
-  if (/720/i.test(label))       s += 20;
-  if (/540|480/i.test(label))   s += 10;
+  if (/1080|FHD/i.test(label)) s += 30;
+  if (/720/i.test(label)) s += 20;
+  if (/540|480/i.test(label)) s += 10;
   if (/ảnh|image|jpg|png|webp/i.test(label)) s += 5;
   return s;
 }

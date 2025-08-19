@@ -2054,6 +2054,9 @@ if (!u) {
 let avatar = u.avatar;
 if (!avatar) avatar = await resolveTikTokAvatar(u);
 console.log('TikTok avatar URL (final):', avatar);
+// 👇 NEW: fallback region
+let region = u.region || u.country || '';
+if (!region) region = await resolveTikTokRegion(u);
 
 const embed = new EmbedBuilder()
   .setColor(0xEE1D52) // màu TikTok
@@ -2075,7 +2078,7 @@ embed.addFields(
   { name: '🤝 Following', value: fmtNum(u.followingCount), inline: true },
   { name: '❤️ Likes',     value: fmtNum(u.heartCount),     inline: true },
   { name: '🎬 Video',      value: fmtNum(u.videoCount),     inline: true },
-  { name: '🌐 Khu vực',    value: u.region || '—',          inline: true },
+  { name: '🌐 Khu vực', value: region || '—', inline: true },
 )
 .setFooter({ text: 'Nguồn: TikWM API (public)' })
 .setTimestamp(new Date());
@@ -2735,6 +2738,45 @@ async function fetchTikTokUserInfo(username) {
 
     region:     user.region || user.country || root.region || root.country || '—',
   };
+}
+// Fallback: cố lấy khu vực (region/country) từ profile TikTok
+async function resolveTikTokRegion(u) {
+  try {
+    // 1) Nếu API đã có sẵn thì dùng luôn
+    const have = (u?.region || u?.country || '').toString().trim().toUpperCase();
+    if (have) return prettyCountry(have);
+
+    // 2) Đọc HTML profile qua proxy r.jina.ai rồi bắt pattern
+    const uname = (u?.uniqueId || u?.username || '').trim();
+    if (!uname) return '';
+
+    const url  = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
+    const html = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' } })
+                  .then(r => r.text()).catch(() => null);
+    if (!html) return '';
+
+    // Ưu tiên "region" hoặc "country" trong JSON, fallback og:locale (vi-VN -> VN)
+    let m = /"region"\s*:\s*"([A-Z]{2})"/i.exec(html)
+         || /"country"\s*:\s*"([A-Z]{2})"/i.exec(html)
+         || /property=["']og:locale["'][^>]+content=["'][a-z]{2}[-_]?([A-Z]{2})["']/i.exec(html);
+
+    const code = m && m[1] ? m[1].toUpperCase() : '';
+    return prettyCountry(code);
+  } catch {
+    return '';
+  }
+}
+
+// Hiển thị tên quốc gia tiếng Việt nếu có thể
+function prettyCountry(code) {
+  try {
+    if (!code) return '';
+    const dn = new Intl.DisplayNames(['vi'], { type: 'region' });
+    const name = dn.of(code);
+    return name ? `${name} (${code})` : code;
+  } catch {
+    return code || '';
+  }
 }
 // Fallback: lấy avatar qua các nguồn công khai (ưu tiên ổn định)
 async function resolveTikTokAvatar(u) {

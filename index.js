@@ -2109,25 +2109,37 @@ return interaction.editReply({ embeds: [embed] });
 
   if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();
-  await interaction.deferReply(); // có thời gian tải
+  await interaction.deferReply();
 
   try {
     const urls = await fetchFacebookMedia(link);
-if (!urls.length) {
-  return interaction.editReply({ content: '⚠️ Không lấy được link...' });
-}
+    if (!urls.length) {
+      return interaction.editReply({ content: '⚠️ Không lấy được link...' });
+    }
 
-// Ưu tiên MP4; nếu không có thì lấy ảnh đầu tiên
-const best = urls.find(u => /\.mp4/i.test(u.url)) || urls[0];
-
-const files = best
-  ? [{
+    // Ưu tiên MP4, nếu không có thì lấy ảnh
+    const best = urls.find(u => /\.mp4/i.test(u.url)) || urls[0];
+    const files = best ? [{
       attachment: best.url,
       name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
-    }]
-  : [];
-    
-await interaction.editReply({ content: '✅ Lấy link thành công!', files });
+    }] : [];
+
+    // Tạo embed
+    const embed = {
+      color: 0x2b88d9,
+      title: "📥 Facebook Downloader",
+      url: link,
+      description: "✅ Tải thành công!",
+      image: best && !/\.mp4/i.test(best.url) ? { url: best.url } : null,
+      footer: { text: "Nguồn: Facebook Public Post" },
+      timestamp: new Date()
+    };
+
+    await interaction.editReply({
+      embeds: [embed],
+      files: files
+    });
+
   } catch (e) {
     console.error("fb handler error:", e);
     if (interaction.deferred || interaction.replied) {

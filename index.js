@@ -2079,7 +2079,7 @@ embed.addFields(
   { name: '🤝 Following', value: fmtNum(u.followingCount), inline: true },
   { name: '❤️ Likes',     value: fmtNum(u.heartCount),     inline: true },
   { name: '🎬 Video',      value: fmtNum(u.videoCount),     inline: true },
-  { name: '🌐 Khu vực', value: region || '—', inline: true },
+  { name: '🌐 Khu vực', value: region || 'VN', inline: true },
 )
 .setFooter({ text: 'Nguồn: TikWM API (public)' })
 .setTimestamp(new Date());

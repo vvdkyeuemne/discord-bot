@@ -1778,41 +1778,50 @@ if (interaction.commandName === 'seek') {
     return interaction.reply({ content: '🤷 Không có bài nào đang phát để tua.', ephemeral: true });
   }
 
+  // lấy tham số
   let seconds = interaction.options.getInteger('seconds', true);
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
 
+  // cắt không vượt quá duration (nếu có)
   const dur = Number(q.now.duration || 0);
   if (dur && seconds >= dur) seconds = Math.max(0, dur - 1);
 
-  // cache thông tin trước khi stop
-  const current = {
-    url: q.now.url,
-    title: q.now.title || '—',
-  };
-  if (!current.url) {
+  const currentUrl = q.now.url;
+  const currentTitle = q.now.title || '—';
+  if (!currentUrl) {
     return interaction.reply({ content: '❌ Không xác định được URL bài hiện tại để tua.', ephemeral: true });
   }
 
   try {
-    // 👇 đánh dấu đang tua để handler Idle bỏ qua
+    // Đặt cờ: lần Idle do stop() sẽ bị bỏ qua
     q.seeking = true;
 
-    // Dừng phát hiện tại (sẽ kích Idle)
+    // dừng player hiện tại (phát sinh Idle)
     try { q.player.stop(); } catch {}
 
-    // Thử native seek từ play-dl trước
-    let s = null;
+    let streamObj = null;
+
+    // 1) thử seek trực tiếp theo URL
     try {
-      s = await play.stream(current.url, { seek: seconds });
+      streamObj = await play.stream(currentUrl, { seek: seconds });
     } catch {}
 
-    if (s && s.stream) {
-      const res = createAudioResource(s.stream, { inputType: s.type, inlineVolume: true });
+    // 2) nếu vẫn null -> lấy info rồi stream từ info (ổn định hơn cho SoundCloud/HLS)
+    if (!streamObj) {
+      try {
+        const info = await play.soundcloud(currentUrl).catch(() => null);
+        if (info) streamObj = await play.stream(info, { seek: seconds });
+      } catch {}
+    }
+
+    if (streamObj?.stream) {
+      // tạo resource từ stream của play-dl
+      const res = createAudioResource(streamObj.stream, { inputType: streamObj.type, inlineVolume: true });
       if (q.volume != null && res.volume) res.volume.setVolume(q.volume);
       q.player.play(res);
     } else {
-      // Fallback: ffmpeg -ss
-      const res = createAudioResource(current.url, {
+      // 3) fallback cuối: thử ffmpeg -ss (sẽ không hiệu quả với 1 số HLS)
+      const res = createAudioResource(currentUrl, {
         inlineVolume: true,
         ffmpeg: { before_options: `-ss ${seconds}` },
       });
@@ -1820,11 +1829,13 @@ if (interaction.commandName === 'seek') {
       q.player.play(res);
     }
 
-    // Không thay đổi q.now, chỉ báo kết quả
-    return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${current.title}**`);
+    // lưu offset để /np cộng thêm và hiển thị đúng
+    q.seekOffset = seconds;
+
+    return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${currentTitle}**`);
   } catch (err) {
     console.error('Seek error:', err);
-    // cố gắng phục hồi để tránh im lặng
+    // phục hồi phát lại để tránh im lặng
     try {
       const back = await play.stream(q.now?.url || '').catch(() => null);
       if (back?.stream) {
@@ -1835,7 +1846,7 @@ if (interaction.commandName === 'seek') {
     } catch {}
     return interaction.reply({ content: '❌ Tua bị lỗi. Thử lại sau nhé.', ephemeral: true });
   } finally {
-    // đảm bảo reset flag nếu có sự cố
+    // nếu vì lý do nào đó Idle không tới, reset cờ sau 1.5s
     setTimeout(() => { if (q.seeking) q.seeking = false; }, 1500);
   }
 }

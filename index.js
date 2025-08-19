@@ -2060,6 +2060,9 @@ if (interaction.commandName === 'tiktokinfo') {
       .setURL(`https://www.tiktok.com/@${u.uniqueId}`)
       .setThumbnail(u.avatar || null)
       .setDescription(u.signature || '—')
+      console.log('TikTok avatar URL:', u.avatar);
+      if (u.avatar) {
+  embed.setImage(u.avatar);
       .addFields(
         { name: '👥 Follower',   value: fmtNum(u.followerCount),  inline: true },
         { name: '🫱🫲 Following', value: fmtNum(u.followingCount), inline: true },

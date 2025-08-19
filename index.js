@@ -2683,43 +2683,41 @@ async function fetchGoogleNews(query = '', limit = 5) {
 
   return items;
       }
-
-// === utils: TikTok user info qua TikWM (public) ===
+// === utils: TikTok user info qua TikWM (robust) ===
 async function fetchTikTokUserInfo(username) {
   const url = `https://www.tikwm.com/api/user/info?unique_id=${encodeURIComponent(username)}`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' }
-  }).catch(() => null);
-
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' } }).catch(() => null);
   if (!res) return null;
+
   const data = await res.json().catch(() => null);
   if (!data || data.code !== 0 || !data.data) return null;
 
-  // TikWM có 2 layout tuỳ thời điểm, xử lý linh hoạt:
-  const u = data.data.user || data.data;
+  // TikWM có nhiều layout: đôi khi { user, stats }, đôi khi dồn vào user
+  const root  = data.data;
+  const user  = root.user || root;
+  const stats = root.stats || user.stats || {};
+
+  // Ép số an toàn
+  const N = v => {
+    const n = Number(String(v ?? '').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
 
   return {
-    uniqueId: u.unique_id || username,
-    nickname: u.nickname || '',
-    avatar: u.avatar_large || u.avatar || u.avatar_thumb || null,
-    signature: u.signature || '',
-    verified: !!u.verified,
-    followerCount: numOrZero(u.follower_count),
-    followingCount: numOrZero(u.following_count),
-    heartCount: numOrZero(u.total_favorited ?? u.heart_count),
-    videoCount: numOrZero(u.aweme_count ?? u.video_count),
-    region: u.region || u.country || '',
+    uniqueId:   user.unique_id || user.uniqueId || username,
+    nickname:   user.nickname || '',
+    avatar:     user.avatar_large || user.avatar_thumb || user.avatar || null,
+    signature:  user.signature || '',
+    verified:   !!(user.verified ?? user.is_verified),
+
+    // Hỗn hợp các khả năng tên field
+    followerCount: N(stats.followerCount ?? user.follower_count ?? stats.follower_count),
+    followingCount:N(stats.followingCount ?? user.following_count ?? stats.following_count),
+    heartCount:    N(stats.heartCount ?? stats.heart ?? user.total_favorited ?? user.heart_count),
+    videoCount:    N(stats.videoCount ?? stats.video ?? user.aweme_count ?? user.video_count),
+
+    region:     user.region || user.country || root.region || root.country || '—',
   };
-}
-
-function numOrZero(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function fmtNum(n) {
-  try { return Number(n ?? 0).toLocaleString('vi-VN'); }
-  catch { return String(n ?? 0); }
 }
 
 // ------------------ utils ------------------

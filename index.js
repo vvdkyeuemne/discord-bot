@@ -2107,41 +2107,69 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
-  if (interaction.commandName === 'fb') {
+  // --- /fb ---
+if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();
-  await interaction.deferReply();
+  await interaction.deferReply(); // cho bot thời gian xử lý
 
   try {
     const urls = await fetchFacebookMedia(link);
     if (!urls.length) {
-      return interaction.editReply({ content: '⚠️ Không lấy được link...' });
+      return interaction.editReply({
+        content: '⚠️ Không lấy được link… Hãy chắc link **public** hoặc thử link khác nhé.'
+      });
     }
 
-    // Ưu tiên MP4, nếu không có thì lấy ảnh
-    const best = urls.find(u => /\.mp4/i.test(u.url)) || urls[0];
-    const files = best ? [{
-      attachment: best.url,
-      name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
-    }] : [];
-
-    // Tạo embed
-    const embed = {
-      color: 0x2b88d9,
-      title: "📥 Facebook Downloader",
-      url: link,
-      description: "✅ Tải thành công!",
-      image: best && !/\.mp4/i.test(best.url) ? { url: best.url } : null,
-      footer: { text: "Nguồn: Facebook Public Post" },
-      timestamp: new Date()
+    // Tách mp4 / ảnh + sắp xếp chất lượng
+    const mp4s = urls.filter(u => /\.mp4/i.test(u.url));
+    const score = (u) => {
+      const q = /(1080|720|640|540|480)/.exec(u.url)?.[1] ?? '';
+      return ({ '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 }[q] || 0);
     };
+    mp4s.sort((a, b) => score(b) - score(a));
 
-    await interaction.editReply({
-      embeds: [embed],
-      files: files
+    const best = mp4s[0] || urls[0]; // ưu tiên mp4 cao nhất, không có thì lấy phần tử đầu
+    const firstImage = urls.find(u => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(u.url));
+
+    // ==== EMBED (gửi TRƯỚC) ====
+    const embed = new EmbedBuilder()
+      .setColor(0x2b88d9)
+      .setTitle('📥 Facebook Downloader')
+      .setURL(link)
+      .setDescription('✅ Tải thành công!')
+      .setFooter({ text: 'Nguồn: Facebook Public Post' })
+      .setTimestamp(new Date());
+
+    if (firstImage) embed.setImage(firstImage.url); // thumbnail cho video
+
+    // Nút chọn chất lượng (tối đa 3)
+    const buttons = mp4s.slice(0, 3).map(u => {
+      const q = /(1080|720|640|540|480)/.exec(u.url)?.[1] ?? 'MP4';
+      return new ButtonBuilder()
+        .setLabel(`${q}p`)
+        .setStyle(ButtonStyle.Link)
+        .setURL(u.url);
     });
 
+    const components = buttons.length
+      ? [new ActionRowBuilder().addComponents(...buttons)]
+      : [];
+
+    // GỬI EMBED TRƯỚC
+    await interaction.editReply({ embeds: [embed], components });
+
+    // ==== GỬI FILE SAU ====
+    if (best?.url?.startsWith('http')) {
+      await interaction.followUp({
+        files: [{
+          attachment: best.url,
+          name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
+        }]
+      });
+    }
+
   } catch (e) {
-    console.error("fb handler error:", e);
+    console.error('fb handler error:', e);
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply('⚠️ Lỗi khi xử lý link Facebook.');
     } else {

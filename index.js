@@ -2079,10 +2079,20 @@ embed.addFields(
 )
 .setFooter({ text: 'Nguồn: TikWM API (public)' })
 .setTimestamp(new Date());
-
 return interaction.editReply({ embeds: [embed] });
-  }
-}
+} catch (e) {
+  console.error('tiktokinfo error:', e);
+  try {
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.editReply('⚠️ Lỗi khi lấy thông tin người dùng. Thử lại sau nhé.');
+    }
+  } catch {}
+  return interaction.reply({
+    content: '⚠️ Lỗi khi lấy thông tin người dùng. Thử lại sau nhé.',
+    ephemeral: true
+  });
+}   // <-- kết thúc try/catch
+}   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 });
 
 // ------------------- misc helpers -------------------

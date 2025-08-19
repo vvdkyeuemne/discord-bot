@@ -2046,40 +2046,41 @@ if (interaction.commandName === 'tiktokinfo') {
 
   try {
     const u = await fetchTikTokUserInfo(username);
-    if (!u) {
-      return interaction.editReply('❌ Không tìm thấy người dùng TikTok này.');
-    }
+if (!u) {
+  return interaction.editReply('❌ Không tìm thấy người dùng TikTok này.');
+}
 
-    const embed = new EmbedBuilder()
-      .setColor(0xEE1D52) // màu TikTok
-      .setAuthor({
-        name: `@${u.uniqueId}${u.verified ? ' • ✔️ Verified' : ''}`,
-        iconURL: u.avatar || null
-      })
-      .setTitle(u.nickname || u.uniqueId)
-      .setURL(`https://www.tiktok.com/@${u.uniqueId}`)
-      .setThumbnail(u.avatar || null)
-      .setDescription(u.signature || '—')
-      console.log('TikTok avatar URL:', u.avatar);
-if (u.avatar) {
-  embed.setImage(u.avatar);
+// cố lấy avatar (API hoặc fallback)
+let avatar = u.avatar;
+if (!avatar) avatar = await resolveTikTokAvatar(u);
+console.log('TikTok avatar URL (final):', avatar);
+
+const embed = new EmbedBuilder()
+  .setColor(0xEE1D52) // màu TikTok
+  .setAuthor({
+    name: `@${u.uniqueId}${u.verified ? ' • ✔️ Verified' : ''}`,
+    iconURL: avatar || undefined,
+  })
+  .setTitle(u.nickname || u.uniqueId)
+  .setURL(`https://www.tiktok.com/@${u.uniqueId}`)
+  .setThumbnail(avatar || undefined)
+  .setDescription(u.signature || '—');
+
+if (avatar) {
+  embed.setImage(avatar); // ảnh lớn bên dưới
 }
 
 embed.addFields(
+  { name: '👥 Follower',  value: fmtNum(u.followerCount),  inline: true },
+  { name: '🤝 Following', value: fmtNum(u.followingCount), inline: true },
+  { name: '❤️ Likes',     value: fmtNum(u.heartCount),     inline: true },
+  { name: '🎬 Video',      value: fmtNum(u.videoCount),     inline: true },
+  { name: '🌐 Khu vực',    value: u.region || '—',          inline: true },
+)
+.setFooter({ text: 'Nguồn: TikWM API (public)' })
+.setTimestamp(new Date());
 
-        { name: '👥 Follower',   value: fmtNum(u.followerCount),  inline: true },
-        { name: '🫱🫲 Following', value: fmtNum(u.followingCount), inline: true },
-        { name: '❤️ Likes',      value: fmtNum(u.heartCount),     inline: true },
-        { name: '🎬 Video',       value: fmtNum(u.videoCount),     inline: true },
-        { name: '🌎 Khu vực',     value: u.region || '—',          inline: true },
-      )
-      .setFooter({ text: 'Nguồn: TikWM API (public)' })
-      .setTimestamp(new Date());
-
-    return interaction.editReply({ embeds: [embed] });
-  } catch (e) {
-    console.error('tiktokinfo error:', e);
-    return interaction.editReply('⚠️ Lỗi khi lấy thông tin người dùng. Thử lại sau nhé.');
+return interaction.editReply({ embeds: [embed] });
   }
 }
 });
@@ -2725,6 +2726,30 @@ async function fetchTikTokUserInfo(username) {
     region:     user.region || user.country || root.region || root.country || '—',
   };
 }
+// Fallback: cố lấy avatar trực tiếp từ trang profile TikTok (qua proxy r.jina.ai)
+async function resolveTikTokAvatar(u) {
+  try {
+    if (u?.avatar && /^https?:\/\//.test(u.avatar)) return u.avatar;
+
+    const uname = u?.uniqueId || u?.username;
+    if (!uname) return null;
+
+    const url = `https://r.jina.ai/http://www.tiktok.com/@${encodeURIComponent(uname)}`;
+    const html = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' } })
+      .then(r => r.text()).catch(() => null);
+    if (!html) return null;
+
+    let m = /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i.exec(html);
+    if (!m) {
+      m = /"avatarThumb"\s*:\s*"([^"]+)"/i.exec(html);
+    }
+    if (m && m[1]) {
+      return m[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+    }
+  } catch {}
+  return null;
+}
+
 
 // utils: format số với dấu phân cách ngàn
 function fmtNum(n) {

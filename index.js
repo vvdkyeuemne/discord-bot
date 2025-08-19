@@ -641,6 +641,15 @@ const commands = [
         )
     ),
 
+new SlashCommandBuilder()
+  .setName('fb')
+  .setDescription('Tải video/ảnh Facebook (public)')
+  .addStringOption(o =>
+    o.setName('url')
+     .setDescription('Dán link Facebook vào đây')
+     .setRequired(true)
+  ),
+  
   // === /tiktokinfo ===
 new SlashCommandBuilder()
   .setName('tiktokinfo')
@@ -2097,6 +2106,45 @@ return interaction.editReply({ embeds: [embed] });
   });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
+
+  if (interaction.commandName === 'fb') {
+  const input = interaction.options.getString('url', true).trim();
+
+  await interaction.deferReply(); // public reply
+
+  // Gọi utils để lấy link tải
+  const items = await fetchFacebookMedia(input);
+
+  if (!items.length) {
+    return interaction.editReply('⚠️ Không lấy được link tải từ bài viết này. Hãy chắc là bài viết **public** hoặc thử link khác nhé.');
+  }
+
+  // Tạo tối đa 5 nút link tải (ưu tiên video HD, sau đó ảnh)
+  const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = await import('discord.js');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x1877F2) // màu FB
+    .setTitle('Tải Facebook')
+    .setURL(input)
+    .setDescription('Chọn chất lượng/định dạng để tải.')
+    .setTimestamp(new Date());
+
+  // Tạo các button link (tối đa 5)
+  const buttons = items.slice(0, 5).map((it, idx) =>
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setLabel(it.label?.slice(0, 80) || `Link ${idx + 1}`)
+      .setURL(it.url)
+  );
+
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  }
+
+  return interaction.editReply({ embeds: [embed], components: rows });
+}
+}
 });
 
 // ------------------- misc helpers -------------------
@@ -2846,6 +2894,96 @@ function fmtNum(n) {
     return String(n ?? 0);
   }
     }
+// === utils: lấy link tải FB qua fsave.net + parse bằng cheerio ===
+async function fetchFacebookMedia(fbUrl) {
+  try {
+    const urlOk = String(fbUrl || '').trim();
+    if (!/^https?:\/\//i.test(urlOk)) return [];
+
+    // POST tới fsave.net/proxy.php như lúc bạn bắt được trên DevTools
+    const body = new URLSearchParams({ url: urlOk }).toString();
+
+    const res = await axios.post(
+      'https://fsave.net/proxy.php',
+      body,
+      {
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'origin': 'https://fsave.net',
+          'referer': 'https://fsave.net/vi',
+          'user-agent': 'Mozilla/5.0 (DiscordBot)'
+        },
+        timeout: 15000
+      }
+    );
+
+    // Trả về có thể là HTML hoặc JSON chứa HTML
+    const html = typeof res.data === 'string'
+      ? res.data
+      : (res.data?.html || '');
+
+    if (!html) return [];
+
+    // Parse các link tải (video/ảnh) từ HTML
+    const $ = cheerio.load(html);
+    const out = [];
+
+    // 1) Bắt các <a> có href trỏ đến fbcdn/scontent/fcontent (video, ảnh)
+    $('a[href]').each((_, a) => {
+      const href = ($(a).attr('href') || '').trim();
+      const label = ($(a).text() || '').replace(/\s+/g, ' ').trim();
+
+      if (!/^https?:\/\//i.test(href)) return;
+
+      // Chỉ nhận các host thường thấy của link tải
+      if (/(fbcdn\.net|scontent|fcontent\.app)/i.test(href)) {
+        out.push({
+          url: href,
+          label: normalizeLabel(label, href)
+        });
+      }
+    });
+
+    // Loại trùng theo URL
+    const dedup = [...new Map(out.map(o => [o.url, o])).values()];
+
+    // Sắp xếp: ưu tiên video 1080/720, rồi ảnh
+    dedup.sort((a, b) => scoreLabel(b.label) - scoreLabel(a.label));
+
+    return dedup;
+  } catch (e) {
+    console.error('fb fetch error:', e?.response?.status, e?.message);
+    return [];
+  }
+}
+
+// chuẩn hóa label cho dễ đọc
+function normalizeLabel(label, href) {
+  if (/\.mp4(?:$|\?)/i.test(href)) {
+    // thử bóc độ phân giải
+    if (/1080|FHD/i.test(label)) return 'Video MP4 1080p';
+    if (/720/i.test(label))      return 'Video MP4 720p';
+    if (/540/i.test(label))      return 'Video MP4 540p';
+    if (/480/i.test(label))      return 'Video MP4 480p';
+    return label || 'Video MP4';
+  }
+  if (/\.(jpe?g|png|webp)(?:$|\?)/i.test(href)) {
+    return label || 'Ảnh';
+  }
+  return label || 'Tải về';
+}
+
+// chấm điểm label để sort
+function scoreLabel(label = '') {
+  let s = 0;
+  if (/video|mp4/i.test(label)) s += 50;
+  if (/1080|FHD/i.test(label))  s += 30;
+  if (/720/i.test(label))       s += 20;
+  if (/540|480/i.test(label))   s += 10;
+  if (/ảnh|image|jpg|png|webp/i.test(label)) s += 5;
+  return s;
+}
+
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

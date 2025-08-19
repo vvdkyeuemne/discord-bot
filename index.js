@@ -640,6 +640,20 @@ const commands = [
     { name: 'channel (chỉ kênh hiện tại)', value: 'channel' }
         )
     ),
+
+  new SlashCommandBuilder()
+  .setName('news')
+  .setDescription('Xem tin nhanh từ Google News')
+  .addStringOption(o =>
+    o.setName('q')
+     .setDescription('Từ khoá / chủ đề (bỏ trống để lấy tin mới nhất)')
+     .setRequired(false))
+  .addIntegerOption(o =>
+    o.setName('limit')
+     .setDescription('Số bài (1-5)')
+     .setMinValue(1)
+     .setMaxValue(5)
+  ),
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -1976,6 +1990,39 @@ if (interaction.commandName === 'playsc') {
       return await interaction.followUp({ content:'⚠️ Có lỗi xảy ra khi xử lý lệnh.', ephemeral:true });
     } catch {}
   }
+  // === /news handler (Google News) ===
+if (interaction.commandName === 'news') {
+  const q = (interaction.options.getString('q') || '').trim();
+  const limitOpt = interaction.options.getInteger('limit');
+  const limit = Math.max(1, Math.min(5, limitOpt ?? 5));
+
+  await interaction.deferReply(); // công khai (không ephemeral)
+
+  try {
+    const items = await fetchGoogleNews(q, limit);
+    if (!items.length) {
+      return interaction.editReply('🙁 Không tìm thấy tin phù hợp.');
+    }
+
+    const title = q ? `📰 Tin mới cho “${q}”` : '📰 Tin mới nhất';
+    const embed = new EmbedBuilder()
+      .setColor(0x2b6cb0)
+      .setTitle(title)
+      .setDescription(
+        items.map((a, i) =>
+          `**${i + 1}. [${a.title}](${a.link})**\n` +
+          `${a.source ? `🗞️ ${a.source} • ` : ''}${timeAgo(a.date)}`
+        ).join('\n\n')
+      )
+      .setFooter({ text: 'Nguồn: Google News' })
+      .setTimestamp(new Date());
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (e) {
+    console.error('news error:', e);
+    return interaction.editReply('⚠️ Lỗi lấy tin. Thử lại sau nhé.');
+  }
+}
 });
 
 // ------------------- misc helpers -------------------
@@ -2518,6 +2565,71 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 });
+
+// ------------ utils: Google News ------------
+function decodeHtml(str = '') {
+  return String(str)
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+// Thời gian tương đối “x phút/giờ/ngày trước”
+function timeAgo(date) {
+  try {
+    const d = (date instanceof Date) ? date : new Date(date);
+    const sec = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) return `${sec}s trước`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} phút trước`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr} giờ trước`;
+    const day = Math.floor(hr / 24);
+    return `${day} ngày trước`;
+  } catch {
+    return '';
+  }
+}
+
+// Lấy tin từ Google News RSS (VN/vi). Query rỗng => top headlines
+async function fetchGoogleNews(query = '', limit = 5) {
+  const base = query
+    ? `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`
+    : `https://news.google.com/rss?hl=vi&gl=VN&ceid=VN:vi`;
+
+  const xml = await fetch(base, { headers: { 'User-Agent': 'discord-bot' } }).then(r => r.text());
+
+  const items = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = itemRe.exec(xml)) && items.length < limit) {
+    const block = m[1];
+
+    const pick = (tag) => {
+      const mm = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(block);
+      return mm ? decodeHtml(mm[1].trim()) : '';
+    };
+
+    const title = pick('title');
+    let link = pick('link');
+    const pub = pick('pubDate');
+    const source = pick('source');
+
+    // dọn link
+    link = link.replace(/&amp;/g, '&');
+
+    items.push({
+      title,
+      link,
+      source,
+      date: pub ? new Date(pub) : new Date(),
+    });
+  }
+
+  return items;
+      }
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

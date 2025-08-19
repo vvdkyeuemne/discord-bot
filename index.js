@@ -2113,19 +2113,19 @@ return interaction.editReply({ embeds: [embed] });
 
   try {
     const urls = await fetchFacebookMedia(link);
-    console.log("FB urls:", urls);
+if (!urls.length) {
+  return interaction.editReply({ content: '⚠️ Không lấy được link...' });
+}
 
-    if (!urls.length) {
-      return interaction.editReply('⚠️ Không lấy được link tải từ bài viết này. Hãy chắc link **public** hoặc thử link khác nhé.');
-    }
-
-    // Gửi 1–2 file đầu (Discord giới hạn ~25MB ở free plan)
-    const files = urls.slice(0, 2).map((u, i) => ({
-      attachment: u,
-      name: /\.mp4/i.test(u) ? `facebook_${i + 1}.mp4` : `facebook_${i + 1}.jpg`,
-    }));
-
-    await interaction.editReply({ content: '✅ Lấy link thành công:', files });
+const files = urls
+  .filter(u => u.url && u.url.startsWith("http"))
+  .slice(0, 2)
+  .map((u, i) => ({
+    attachment: u.url,
+    name: `facebook_${i + 1}.${u.url.includes('.mp4') ? 'mp4' : 'jpg'}`
+  }));
+    
+await interaction.editReply({ content: '✅ Lấy link thành công!', files });
   } catch (e) {
     console.error("fb handler error:", e);
     if (interaction.deferred || interaction.replied) {

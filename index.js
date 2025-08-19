@@ -2107,54 +2107,70 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
- // === /fb: tải video/ảnh Facebook ===
+ // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
-  const raw = interaction.options.getString('url', true);
-  const link = (raw || '').trim();
-  await interaction.deferReply(); // cho bot thời gian xử lý
+  const link = interaction.options.getString('url', true).trim();
+  await interaction.deferReply(); // cho bot thời gian lấy link
 
   try {
-    const urls = await fetchFacebookMedia(link);
-    if (!Array.isArray(urls) || urls.length === 0) {
-      return interaction.editReply({ content: '⚠️ Không lấy được link tải từ bài viết này. Hãy chắc là bài viết public hoặc thử link khác nhé.' });
+    // gọi downr để lấy media + meta
+    const { medias, meta } = await fetchFacebookViaDownr(link);
+
+    if (!medias.length) {
+      return interaction.editReply({
+        content: '⚠️ Không tìm thấy link tải từ bài viết này. Hãy chắc là bài viết **public** hoặc thử link khác nhé.',
+      });
     }
 
-    // Chọn 1 link tốt nhất để gửi file (tránh gửi 2 lần)
-    const best = urls.find(u => u && /\.mp4/i.test(u.url)) || urls[0];
-    if (!best || !best.url || !/^https?:\/\//i.test(best.url)) {
-      return interaction.editReply({ content: '⚠️ Không tìm thấy file trực tiếp hợp lệ.' });
-    }
-
-    // 1) Gửi EMBED trước
+    // ==== gửi EMBED trước (thumbnail + caption + author)
     const embed = new EmbedBuilder()
-      .setColor(0x1877F2)
-      .setTitle('📥 Facebook Downloader')
-      .setDescription('✅ Tải thành công!')
-      .setFooter({ text: `Nguồn: Facebook Public Post | Hôm nay lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
+      .setColor(0x1877f2)
+      .setTitle('⬇️ Facebook Downloader')
+      .setDescription('✅ Tải thành công! 🎉')
+      .setFooter({ text: 'Nguồn: Facebook Public Post' })
+      .setTimestamp(new Date());
+
+    if (meta?.thumbnail) embed.setImage(meta.thumbnail);
+    if (meta?.caption || meta?.title) {
+      embed.addFields({
+        name: '📖 Caption',
+        value: trimField(meta.caption || meta.title, 1024),
+      });
+    }
+    if (meta?.author) {
+      embed.addFields({
+        name: '✍️ Tác giả',
+        value: trimField(meta.author, 256),
+        inline: true,
+      });
+    }
+
     await interaction.editReply({ embeds: [embed] });
 
-    // 2) Sau đó mới gửi FILE (để hiện embed trước, tùy chọn chèn delay nhẹ)
-    const file = {
-      attachment: best.url,
-      name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
-    };
+    // ==== sau đó gửi FILE tốt nhất
+    const best = pickBestMedia(medias);
+    if (!best?.url) return;
 
-    // Nếu muốn chắc chắn embed render xong rồi mới có file, có thể delay 400–600ms
-    setTimeout(() => {
-      interaction.followUp({ files: [file] }).catch(err => {
-        console.error('fb followUp error:', err);
-      });
-    }, 500);
-
+    await interaction.followUp({
+      files: [
+        {
+          attachment: best.url,
+          name: safeFilename(
+            `facebook.${best.ext || (best.type === 'image' ? 'jpg' : 'mp4')}`
+          ),
+        },
+      ],
+    });
   } catch (e) {
-    console.error('fb handler error:', e);
+    console.error('fb handler error:', e?.response?.status, e?.message);
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply({ content: '⚠️ Lỗi khi xử lý link Facebook.' });
+      await interaction.editReply('⚠️ Lỗi khi xử lý link Facebook.');
     } else {
       await interaction.reply({ content: '⚠️ Lỗi khi xử lý link Facebook.', ephemeral: true });
     }
   }
 }
+// ===================== end /fb handler =====================
 });
 
 // ------------------- misc helpers -------------------
@@ -2904,140 +2920,119 @@ function fmtNum(n) {
     return String(n ?? 0);
   }
     }
-// === utils: lấy link tải FB qua fsave.net (hỗ trợ JSON hoặc HTML) ===
-async function fetchFacebookMedia(fbUrl) {
-  try {
-    // chuẩn hoá link
-    let urlOk = String(fbUrl || '').trim();
-    try { urlOk = decodeURIComponent(urlOk); } catch {}
-    if (!/^https?:\/\/\S+/i.test(urlOk)) return [];
+// ===================== Utils cho Downr =====================
 
-    // m. -> www. cho ổn định
-    urlOk = urlOk.replace(/^https?:\/\/m\.facebook\.com/i, 'https://www.facebook.com');
+/**
+ * Gọi endpoint downr để lấy danh sách media + meta
+ * Trả về { medias: [{type, url, ext, quality}], meta: {thumbnail, caption, title, author} }
+ */
+async function fetchFacebookViaDownr(rawUrl) {
+  let url = (rawUrl || '').trim();
+  try { url = decodeURIComponent(url); } catch {}
+  if (!/^https?:\/\//i.test(url)) return { medias: [], meta: {} };
 
-    // POST tới fsave proxy (đã bắt bằng DevTools)
-    const body = new URLSearchParams({ url: urlOk, lang: 'vi' }).toString();
+  // chuẩn hóa 1 số host
+  url = url.replace(/^m\.facebook\.com/i, 'www.facebook.com');
 
-    const res = await axios.post(
-      'https://fsave.net/proxy.php',
-      body,
-      {
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'origin': 'https://fsave.net',
-          'referer': 'https://fsave.net/vi',
-          'user-agent': 'Mozilla/5.0 (DiscordBot)'
-        },
-        timeout: 15000,
-        maxRedirects: 3,
-        validateStatus: () => true
-      }
-    );
-
-    // FSave có khi trả HTML string, có khi trả JSON (chứa html hoặc data)
-    let payload = res?.data;
-
-    // Nếu là object -> thử gom link trực tiếp từ JSON
-    const outFromJSON = [];
-    const pushUrl = (u) => {
-      if (!u || typeof u !== 'string') return;
-      const href = u.trim();
-      // chấp nhận fbcdn/scontent/fcontent hoặc đuôi mp4/jpg/png
-      const ok =
-        /^https?:\/\/[^ ]+fbcdn\.net\/.+/i.test(href) ||
-        /^https?:\/\/[^ ]+scontent[^ ]*\.xx\.fbcdn\.net\/.+/i.test(href) ||
-        /^https?:\/\/s\d+\.fcontent\.app\/.+/i.test(href) ||
-        /^https?:\/\/.+\.(mp4|jpg|jpeg|png|webp)(\?|$)/i.test(href);
-      if (!ok) return;
-      outFromJSON.push({ url: href, label: normalizeLabel('', href) });
-    };
-
-    const walk = (node) => {
-      if (!node) return;
-      if (typeof node === 'string') pushUrl(node);
-      else if (Array.isArray(node)) node.forEach(walk);
-      else if (typeof node === 'object') {
-        for (const v of Object.values(node)) walk(v);
-      }
-    };
-
-    if (payload && typeof payload === 'object') {
-      // một số bản trả { html: "..."}; 1 số bản trả {data:{links:[...]}} v.v.
-      walk(payload);
-      if (outFromJSON.length) {
-        // dedup + sort như cũ
-        const dedup = [...new Map(outFromJSON.map(o => [o.url, o])).values()];
-        dedup.sort((a, b) => scoreLabel(b.label) - scoreLabel(a.label));
-        return dedup;
-      }
+  const res = await axios.post(
+    'https://downr.org/.netlify/functions/download',
+    { url },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://downr.org',
+        'Referer': 'https://downr.org/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+        'Accept': 'application/json, text/html, */*'
+      },
+      timeout: 20000,
+      validateStatus: () => true
     }
+  );
 
-    // Nếu là string => coi như HTML (hoặc object có field html)
-    const html =
-      typeof payload === 'string'
-        ? payload
-        : (payload && typeof payload.html === 'string' ? payload.html : '');
+  let data = res?.data;
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch {} }
 
-    if (!html) return [];
+  const medias = [];
+  const meta = {
+    thumbnail: data?.thumbnail || data?.thumb || data?.image || data?.preview || '',
+    caption:   data?.caption || data?.title || data?.description || '',
+    title:     data?.title || '',
+    author:    data?.author || data?.uploader || data?.owner || ''
+  };
 
-    // Parse các link tải (video/ảnh) từ HTML bằng cheerio
-    const $ = cheerioLoad(html);
-    const out = [];
+  // gom các mảng media có thể có
+  const buckets = [
+    data?.medias,
+    data?.data?.medias,
+    data?.data?.links,
+    data?.links
+  ].filter(Array.isArray);
 
-    // Bắt <a href="...">
-    $('a[href]').each((_, a) => {
-      const href = String($(a).attr('href') || '').trim();
-      const labelRaw = ($(a).text() || '').replace(/\s+/g, ' ').trim();
-      if (!/^https?:\/\/\S+/i.test(href)) return;
+  for (const arr of buckets) {
+    for (const m of arr) {
+      const u = m?.url || m?.download || m?.href || m?.src || m?.link || '';
+      if (!/^https?:\/\//i.test(u)) continue;
 
-      // chỉ nhận các host/link thường thấy của link tải
-      if (
-        /(fbcdn\.net|scontent|fcontent\.app)/i.test(href) ||
-        /\.(mp4|jpg|jpeg|png|webp)(\?|$)/i.test(href)
-      ) {
-        out.push({
-          url: href,
-          label: normalizeLabel(labelRaw, href)
-        });
-      }
-    });
+      const type =
+        (m?.type || '').toLowerCase().includes('image') ? 'image' :
+        (m?.type || '').toLowerCase().includes('video') ? 'video' :
+        /\.mp4(\?|$)/i.test(u) ? 'video' :
+        /\.(jpg|jpeg|png|webp)(\?|$)/i.test(u) ? 'image' : 'file';
 
-    // Loại trùng theo URL
-    const dedup = [...new Map(out.map(o => [o.url, o])).values()];
+      const ext =
+        m?.ext ||
+        (type === 'image'
+          ? (/\.(jpe?g|png|webp)/i.exec(u)?.[1] || 'jpg')
+          : (/\.(mp4|mov|m4v)/i.exec(u)?.[1] || 'mp4'));
 
-    // Sắp xếp: ưu tiên video 1080/720, rồi ảnh
-    dedup.sort((a, b) => scoreLabel(b.label) - scoreLabel(a.label));
+      const quality =
+        m?.quality || m?.label || m?.resolution ||
+        (/(\d{3,4})p/i.exec(u)?.[1] + 'p') || '';
 
-    return dedup;
-  } catch (e) {
-    console.error('fb fetch error:', e?.response?.status, e?.message);
-    return [];
+      medias.push({ type, url: u, ext, quality });
+    }
   }
-}
 
-// === chuẩn hoá label (giữ như cũ của bạn, hoặc dán nếu chưa có) ===
-function normalizeLabel(label, href) {
-  if (/\.mp4(?:\?|$)/i.test(href)) {
-    if (/1080|FHD/i.test(label)) return 'Video MP4 1080p';
-    if (/720/i.test(label)) return 'Video MP4 720p';
-    if (/540/i.test(label)) return 'Video MP4 540p';
-    if (/480/i.test(label)) return 'Video MP4 480p';
-    return 'Video MP4';
+  // fallback nếu chỉ có một url đơn lẻ
+  if (!medias.length && typeof data?.url === 'string') {
+    const u = data.url;
+    const type = /\.mp4(\?|$)/i.test(u) ? 'video'
+                : /\.(jpg|jpeg|png|webp)(\?|$)/i.test(u) ? 'image'
+                : 'file';
+    const ext = /\.(mp4|mov|m4v|jpg|jpeg|png|webp)/i.exec(u)?.[1] || (type === 'image' ? 'jpg' : 'mp4');
+    medias.push({ type, url: u, ext, quality: '' });
   }
-  if (/\.(jpe?g|png|webp)(?:\?|$)/i.test(href)) return label || 'Ảnh';
-  return label || 'Tải về';
+
+  return { medias, meta };
 }
 
-// === chấm điểm để sort (giữ như cũ của bạn, hoặc dán nếu chưa có) ===
-function scoreLabel(label = '') {
-  let s = 0;
-  if (/video|mp4/i.test(label)) s += 50;
-  if (/1080|FHD/i.test(label)) s += 30;
-  if (/720/i.test(label)) s += 20;
-  if (/540|480/i.test(label)) s += 10;
-  if (/ảnh|image|jpg|png|webp/i.test(label)) s += 5;
-  return s;
+/** Chọn media tốt nhất: ưu tiên video 1080 > 720 > 480; nếu không có => lấy ảnh đầu */
+function pickBestMedia(medias = []) {
+  if (!medias.length) return null;
+
+  const score = (m) => {
+    const isVideo = m.type === 'video' || /\.mp4(\?|$)/i.test(m.url);
+    const q = /(\d{3,4})p/.exec(m.quality || m.url)?.[1] || '';
+    const qScore = q === '1080' ? 300 : q === '720' ? 200 : q === '480' ? 100 : 50;
+    return (isVideo ? 1000 : 0) + qScore;
+  };
+
+  return [...medias].sort((a, b) => score(b) - score(a))[0];
 }
+
+/** Cắt text cho field embed */
+function trimField(s = '', max = 1024) {
+  const t = String(s).trim();
+  return t.length > max ? t.slice(0, max - 3) + '…' : t || '—';
+}
+
+/** Tên file an toàn */
+function safeFilename(name = 'file') {
+  return name.replace(/[^\w.\-]+/g, '_');
+}
+// ===================== end Utils Downr =====================
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

@@ -2720,6 +2720,14 @@ async function fetchTikTokUserInfo(username) {
   };
 }
 
+// utils: format số với dấu phân cách ngàn
+function fmtNum(n) {
+  try {
+    return Number(n ?? 0).toLocaleString('vi-VN');
+  } catch {
+    return String(n ?? 0);
+  }
+    }
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

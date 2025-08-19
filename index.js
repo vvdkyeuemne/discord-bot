@@ -278,10 +278,14 @@ q.player.on('stateChange', (oldState, newState) => {
 });
 
 // Khi player phát xong (Idle) thì tự qua bài kế tiếp
+// ⚠️ Nếu vừa tua (seek) thì bỏ qua lần Idle phát sinh do .stop()
 q.player.on(AudioPlayerStatus.Idle, () => {
-  try { playNext(interaction.guildId); } catch (e) { console.error('Idle→playNext error:', e); }
+  if (q.seeking) {        // flag được set trong lệnh /seek
+    q.seeking = false;    // reset để lần Idle sau hoạt động bình thường
+    return;
+  }
+  try { playNext(interaction.guildId); } catch (e) { console.error(e); }
 });
-
 // Nếu player lỗi thì cũng nhảy tiếp bài
 q.player.on('error', (err) => {
   console.error('Player error:', err);
@@ -1767,35 +1771,36 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       try { q.player?.state?.resource?.volume?.setVolume(q.volume); } catch {}
       return interaction.reply(`🔊 Âm lượng: **${p}%**`);
     }
-    // == /seek: tua bài đang phát ==
+   // == /seek: tua bài đang phát ==
 if (interaction.commandName === 'seek') {
   const q = getQ(interaction.guildId);
   if (!q || !q.now || !q.player) {
     return interaction.reply({ content: '🤷 Không có bài nào đang phát để tua.', ephemeral: true });
   }
 
-  // seconds hợp lệ
   let seconds = interaction.options.getInteger('seconds', true);
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
 
-  // giới hạn theo tổng thời lượng (nếu biết)
   const dur = Number(q.now.duration || 0);
   if (dur && seconds >= dur) seconds = Math.max(0, dur - 1);
 
-  try {
-    // 👉 Cache thông tin hiện tại trước khi stop
-    const current = {
-      url: q.now?.url || null,
-      title: q.now?.title || '—',
-    };
-    if (!current.url) {
-      return interaction.reply({ content: '❌ Không xác định được URL bài hiện tại để tua.', ephemeral: true });
-    }
+  // cache thông tin trước khi stop
+  const current = {
+    url: q.now.url,
+    title: q.now.title || '—',
+  };
+  if (!current.url) {
+    return interaction.reply({ content: '❌ Không xác định được URL bài hiện tại để tua.', ephemeral: true });
+  }
 
-    // dừng phát (an toàn)
+  try {
+    // 👇 đánh dấu đang tua để handler Idle bỏ qua
+    q.seeking = true;
+
+    // Dừng phát hiện tại (sẽ kích Idle)
     try { q.player.stop(); } catch {}
 
-    // thử native seek trước
+    // Thử native seek từ play-dl trước
     let s = null;
     try {
       s = await play.stream(current.url, { seek: seconds });
@@ -1806,7 +1811,7 @@ if (interaction.commandName === 'seek') {
       if (q.volume != null && res.volume) res.volume.setVolume(q.volume);
       q.player.play(res);
     } else {
-      // fallback: ffmpeg -ss
+      // Fallback: ffmpeg -ss
       const res = createAudioResource(current.url, {
         inlineVolume: true,
         ffmpeg: { before_options: `-ss ${seconds}` },
@@ -1815,21 +1820,23 @@ if (interaction.commandName === 'seek') {
       q.player.play(res);
     }
 
+    // Không thay đổi q.now, chỉ báo kết quả
     return interaction.reply(`⏩ Đã tua đến **${seconds}s** trong bài **${current.title}**`);
   } catch (err) {
     console.error('Seek error:', err);
-
-    // phục hồi phát lại để tránh im lặng
+    // cố gắng phục hồi để tránh im lặng
     try {
-      const back = await play.stream(q?.now?.url || '').catch(() => null);
+      const back = await play.stream(q.now?.url || '').catch(() => null);
       if (back?.stream) {
         const r0 = createAudioResource(back.stream, { inputType: back.type, inlineVolume: true });
         if (q.volume != null && r0.volume) r0.volume.setVolume(q.volume);
         q.player.play(r0);
       }
     } catch {}
-
     return interaction.reply({ content: '❌ Tua bị lỗi. Thử lại sau nhé.', ephemeral: true });
+  } finally {
+    // đảm bảo reset flag nếu có sự cố
+    setTimeout(() => { if (q.seeking) q.seeking = false; }, 1500);
   }
 }
     

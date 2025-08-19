@@ -2117,13 +2117,15 @@ if (!urls.length) {
   return interaction.editReply({ content: '⚠️ Không lấy được link...' });
 }
 
-const files = urls
-  .filter(u => u.url && u.url.startsWith("http"))
-  .slice(0, 2)
-  .map((u, i) => ({
-    attachment: u.url,
-    name: `facebook_${i + 1}.${u.url.includes('.mp4') ? 'mp4' : 'jpg'}`
-  }));
+// Ưu tiên MP4; nếu không có thì lấy ảnh đầu tiên
+const best = urls.find(u => /\.mp4/i.test(u.url)) || urls[0];
+
+const files = best
+  ? [{
+      attachment: best.url,
+      name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
+    }]
+  : [];
     
 await interaction.editReply({ content: '✅ Lấy link thành công!', files });
   } catch (e) {

@@ -2057,6 +2057,7 @@ console.log('TikTok avatar URL (final):', avatar);
 // 👇 NEW: fallback region
 let region = u.region || u.country || '';
 if (!region) region = await resolveTikTokRegion(u);
+console.log('TikTok region raw:', u.region, u.country, '→ resolved:', region);
 
 const embed = new EmbedBuilder()
   .setColor(0xEE1D52) // màu TikTok
@@ -2743,7 +2744,7 @@ async function fetchTikTokUserInfo(username) {
 async function resolveTikTokRegion(u) {
   try {
     // 1) Nếu API đã có sẵn thì dùng luôn
-    const have = (u?.region || u?.country || '').toString().trim().toUpperCase();
+    const have = (u?.region || u?.country || '').toString().trim();
     if (have) return prettyCountry(have);
 
     // 2) Đọc HTML profile qua proxy r.jina.ai rồi bắt pattern
@@ -2755,27 +2756,49 @@ async function resolveTikTokRegion(u) {
                   .then(r => r.text()).catch(() => null);
     if (!html) return '';
 
-    // Ưu tiên "region" hoặc "country" trong JSON, fallback og:locale (vi-VN -> VN)
-    let m = /"region"\s*:\s*"([A-Z]{2})"/i.exec(html)
-         || /"country"\s*:\s*"([A-Z]{2})"/i.exec(html)
-         || /property=["']og:locale["'][^>]+content=["'][a-z]{2}[-_]?([A-Z]{2})["']/i.exec(html);
+    // Thử nhiều khả năng: region, country, country_code, og:locale, và location dạng chữ
+    let m =
+      /"region"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
+      /"country"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
+      /"country_code"\s*:\s*"([A-Za-z]{2})"/i.exec(html) ||
+      /property=["']og:locale["'][^>]+content=["'][a-z]{2}[-_]?([A-Za-z]{2})["']/i.exec(html);
 
-    const code = m && m[1] ? m[1].toUpperCase() : '';
-    return prettyCountry(code);
+    if (m && m[1]) {
+      return prettyCountry(m[1]); // là mã 2 chữ
+    }
+
+    // Fallback cuối: "location":"Vietnam" (trả nguyên tên nếu có)
+    const mLoc = /"location"\s*:\s*"([^"]+)"/i.exec(html);
+    if (mLoc && mLoc[1]) {
+      const loc = mLoc[1].trim();
+      // nếu loc là mã 2 chữ thì prettify, còn lại trả nguyên
+      if (/^[A-Za-z]{2}$/.test(loc)) return prettyCountry(loc);
+      return loc;
+    }
+
+    return '';
   } catch {
     return '';
   }
 }
 
 // Hiển thị tên quốc gia tiếng Việt nếu có thể
-function prettyCountry(code) {
+function prettyCountry(codeOrName) {
   try {
-    if (!code) return '';
-    const dn = new Intl.DisplayNames(['vi'], { type: 'region' });
-    const name = dn.of(code);
-    return name ? `${name} (${code})` : code;
+    if (!codeOrName) return '';
+    const v = codeOrName.toString().trim();
+
+    // Nếu là mã 2 chữ (VN, US, …) thì đổi sang tên tiếng Việt
+    if (/^[A-Za-z]{2}$/.test(v)) {
+      const dn = new Intl.DisplayNames(['vi'], { type: 'region' });
+      const name = dn.of(v.toUpperCase());
+      return name ? `${name} (${v.toUpperCase()})` : v.toUpperCase();
+    }
+
+    // Nếu đã là tên (Vietnam, United States, …) thì trả luôn
+    return v;
   } catch {
-    return code || '';
+    return codeOrName || '';
   }
 }
 // Fallback: lấy avatar qua các nguồn công khai (ưu tiên ổn định)

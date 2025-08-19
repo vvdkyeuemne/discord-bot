@@ -2144,7 +2144,6 @@ return interaction.editReply({ embeds: [embed] });
 
   return interaction.editReply({ embeds: [embed], components: rows });
 }
-}
 });
 
 // ------------------- misc helpers -------------------

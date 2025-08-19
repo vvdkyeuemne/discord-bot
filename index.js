@@ -641,6 +641,16 @@ const commands = [
         )
     ),
 
+  // === /tiktokinfo ===
+new SlashCommandBuilder()
+  .setName('tiktokinfo')
+  .setDescription('Xem thông tin hồ sơ TikTok theo username')
+  .addStringOption(o =>
+    o.setName('username')
+     .setDescription('Username TikTok (bỏ @ cũng được), ví dụ: tiktok')
+     .setRequired(true)
+  ),
+
   new SlashCommandBuilder()
   .setName('news')
   .setDescription('Xem tin nhanh từ Google News')
@@ -2023,6 +2033,49 @@ if (interaction.commandName === 'news') {
     return interaction.editReply('⚠️ Lỗi lấy tin. Thử lại sau nhé.');
   }
 }
+  // === /tiktokinfo: xem thông tin hồ sơ TikTok ===
+if (interaction.commandName === 'tiktokinfo') {
+  const raw = interaction.options.getString('username', true);
+  const username = raw.replace(/^@/, '').trim().toLowerCase();
+
+  if (!username) {
+    return interaction.reply({ content: '⚠️ Vui lòng nhập username TikTok.', ephemeral: true });
+  }
+
+  await interaction.deferReply(); // trả lời công khai
+
+  try {
+    const u = await fetchTikTokUserInfo(username);
+    if (!u) {
+      return interaction.editReply('❌ Không tìm thấy người dùng TikTok này.');
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0xEE1D52) // màu TikTok
+      .setAuthor({
+        name: `@${u.uniqueId}${u.verified ? ' • ✔️ Verified' : ''}`,
+        iconURL: u.avatar || null
+      })
+      .setTitle(u.nickname || u.uniqueId)
+      .setURL(`https://www.tiktok.com/@${u.uniqueId}`)
+      .setThumbnail(u.avatar || null)
+      .setDescription(u.signature || '—')
+      .addFields(
+        { name: '👥 Follower',   value: fmtNum(u.followerCount),  inline: true },
+        { name: '🫱🫲 Following', value: fmtNum(u.followingCount), inline: true },
+        { name: '❤️ Likes',      value: fmtNum(u.heartCount),     inline: true },
+        { name: '🎬 Video',       value: fmtNum(u.videoCount),     inline: true },
+        { name: '🌎 Khu vực',     value: u.region || '—',          inline: true },
+      )
+      .setFooter({ text: 'Nguồn: TikWM API (public)' })
+      .setTimestamp(new Date());
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (e) {
+    console.error('tiktokinfo error:', e);
+    return interaction.editReply('⚠️ Lỗi khi lấy thông tin người dùng. Thử lại sau nhé.');
+  }
+}
 });
 
 // ------------------- misc helpers -------------------
@@ -2630,6 +2683,44 @@ async function fetchGoogleNews(query = '', limit = 5) {
 
   return items;
       }
+
+// === utils: TikTok user info qua TikWM (public) ===
+async function fetchTikTokUserInfo(username) {
+  const url = `https://www.tikwm.com/api/user/info?unique_id=${encodeURIComponent(username)}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (DiscordBot)' }
+  }).catch(() => null);
+
+  if (!res) return null;
+  const data = await res.json().catch(() => null);
+  if (!data || data.code !== 0 || !data.data) return null;
+
+  // TikWM có 2 layout tuỳ thời điểm, xử lý linh hoạt:
+  const u = data.data.user || data.data;
+
+  return {
+    uniqueId: u.unique_id || username,
+    nickname: u.nickname || '',
+    avatar: u.avatar_large || u.avatar || u.avatar_thumb || null,
+    signature: u.signature || '',
+    verified: !!u.verified,
+    followerCount: numOrZero(u.follower_count),
+    followingCount: numOrZero(u.following_count),
+    heartCount: numOrZero(u.total_favorited ?? u.heart_count),
+    videoCount: numOrZero(u.aweme_count ?? u.video_count),
+    region: u.region || u.country || '',
+  };
+}
+
+function numOrZero(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtNum(n) {
+  try { return Number(n ?? 0).toLocaleString('vi-VN'); }
+  catch { return String(n ?? 0); }
+}
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

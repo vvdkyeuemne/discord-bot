@@ -3267,23 +3267,41 @@ client.on('messageCreate', async (msg) => {
       return;
     }
 
-    // --- guard cuối: nếu best vẫn >25MB thì chỉ gửi nút ---
-    try {
-      const s = await getRemoteSize(best.url);
-      if (s && s > 25 * 1024 * 1024) {
-        await msg.reply({
-          embeds: [embed],
-          components: [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setStyle(ButtonStyle.Link)
-                .setLabel('Mở media (quá 25MB)')
-                .setURL(best.url)
-            ),
-          ],
-        });
-        return;
-      }
+    // --- guard cuối: nếu KHÔNG lấy được size hoặc size >= 25MB thì chỉ gửi nút ---
+try {
+  const LIMIT = 25 * 1024 * 1024;
+  const s = await getRemoteSize(best.url);
+  if (!s || s >= LIMIT) {                    // <--- CHỖ QUAN TRỌNG
+    const first = ordered[0] || best;
+    await msg.reply({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel('Mở media (quá 25MB)')
+            .setURL(first.url)
+        )
+      ]
+    });
+    return;
+  }
+} catch {
+  // Nếu HEAD lỗi -> cũng chỉ gửi nút
+  const first = ordered[0] || best;
+  await msg.reply({
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel('Mở media (quá 25MB)')
+          .setURL(first.url)
+      )
+    ]
+  });
+  return;
+}
     } catch {}
 
     // --- có file phù hợp (≤25MB) -> gửi file ---

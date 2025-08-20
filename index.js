@@ -673,8 +673,7 @@ new SlashCommandBuilder()
      .setMinValue(1)
      .setMaxValue(5)
   ),
-]
-, 
+  
 new SlashCommandBuilder()
   .setName('fbauto')
   .setDescription('Bật/tắt auto tải Facebook trong server/kênh')

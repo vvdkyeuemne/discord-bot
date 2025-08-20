@@ -650,6 +650,15 @@ new SlashCommandBuilder()
      .setRequired(true)
   ),
   
+new SlashCommandBuilder()
+  .setName('insta')
+  .setDescription('Tải ảnh/video Instagram (post, reel, photo)')
+  .addStringOption(o =>
+    o.setName('url')
+     .setDescription('Dán link Instagram vào đây')
+     .setRequired(true)
+  ),
+  
   // === /tiktokinfo ===
 new SlashCommandBuilder()
   .setName('tiktokinfo')
@@ -2107,6 +2116,42 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
+// === /insta handler ===
+if (interaction.commandName === "insta") {
+  const url = interaction.options.getString("url", true);
+
+  await interaction.deferReply(); // công khai
+
+  try {
+    const { medias, meta } = await fetchInstagram(url);
+
+    if (!medias?.length) {
+      return interaction.editReply("⚠️ Không tải được media từ link Instagram.");
+    }
+
+    // lấy media đầu tiên
+    const media = medias[0];
+
+    const embed = new EmbedBuilder()
+      .setColor(0xff3399)
+      .setTitle("📷 Instagram Download")
+      .setDescription(`Tác giả: ${meta?.author || "Ẩn danh"}`)
+      .setURL(url)
+      .setFooter({ text: "Nguồn: Instagram" })
+      .setTimestamp();
+
+    if (media.thumbnail) embed.setImage(media.thumbnail);
+
+    await interaction.editReply({
+      embeds: [embed],
+      files: [media.url], // gửi file kèm luôn
+    });
+  } catch (e) {
+    console.error("insta handler error:", e);
+    return interaction.editReply("⚠️ Có lỗi khi xử lý link Instagram.");
+  }
+}
+  
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();
@@ -3033,6 +3078,93 @@ function safeFilename(name = 'file') {
   return name.replace(/[^\w.\-]+/g, '_');
 }
 // ===================== end Utils Downr =====================
+
+// ================= Utils cho Downr (Instagram) =================
+
+/**
+ * Gọi endpoint downr để lấy danh sách media + meta từ Instagram
+ * Trả về { medias: [{type, url, ext, quality}], meta: {thumbnail, caption, title, author} }
+ */
+async function fetchInstagramViaDownr(rawUrl) {
+  let url = (rawUrl || '').trim();
+  try { url = decodeURIComponent(url); } catch {}
+  if (!/^https?:\/\//i.test(url)) return { medias: [], meta: {} };
+
+  const res = await axios.post(
+    'https://downr.org/.netlify/functions/download',
+    { url },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://downr.org',
+        'Referer': 'https://downr.org/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+        'Accept': 'application/json, text/html, */*',
+      },
+      timeout: 20000,
+      validateStatus: () => true,
+    }
+  );
+
+  let data = res?.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch {}
+  }
+
+  const medias = [];
+  const meta = {
+    thumbnail: data?.thumbnail || data?.thumb || data?.image || '',
+    caption: data?.caption || data?.title || data?.description || '',
+    title: data?.title || '',
+    author: data?.author || data?.uploader || data?.owner || ''
+  };
+
+  // gom các mảng media có thể có
+  const buckets = [
+    data?.medias,
+    data?.data,
+    data?.links,
+  ].filter(Array.isArray);
+
+  for (const arr of buckets) {
+    for (const m of arr) {
+      const u = m?.url || m?.download || m?.href || m?.src || m?.link || '';
+      if (!/^https?:\/\//i.test(u)) continue;
+
+      const type =
+        (m?.type || '').toLowerCase().includes('image') ? 'image'
+        : (m?.type || '').toLowerCase().includes('video') ? 'video'
+        : /\.mp4$/i.test(u) ? 'video'
+        : /\.(jpg|jpeg|png|webp|gif)$/i.test(u) ? 'image'
+        : 'file';
+
+      const ext =
+        m?.ext ||
+        (type === 'image'
+          ? (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg')
+          : /\.mp4$/i.test(u) ? 'mp4' : '');
+
+      const quality = m?.quality || m?.label || m?.resolution || '';
+
+      medias.push({ type, url: u, ext, quality });
+    }
+  }
+
+  // fallback nếu chỉ có 1 url đơn lẻ
+  if (!medias.length && typeof data?.url === 'string') {
+    const u = data.url;
+    const type = /\.mp4$/i.test(u) ? 'video'
+      : /\.(jpg|jpeg|png|webp|gif)$/i.test(u) ? 'image'
+      : 'file';
+    const ext = /\.mp4$/i.test(u) ? 'mp4'
+      : /\.(jpg|jpeg|png|webp|gif)$/i.test(u) ? (/\.(\w+)$/i.exec(u)?.[1] || 'jpg')
+      : '';
+    medias.push({ type, url: u, ext, quality: '' });
+  }
+
+  return { medias, meta };
+}
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

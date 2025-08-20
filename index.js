@@ -3223,7 +3223,7 @@ client.on('messageCreate', async (msg) => {
       console.warn('[fbauto] no medias', pkg);
       return;
     }
-
+console.log('[fbauto] sending', { thumb: pkg.thumb, medias: pkg.medias.length }); // <-- LOG 3
     const files = [{
       attachment: best.url,
       name: `facebook.${/\.mp4(?:\?|$)/i.test(best.url) ? 'mp4' : 'jpg'}`

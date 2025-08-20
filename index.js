@@ -2180,7 +2180,6 @@ if (secondBatch.length) {
   await interaction.followUp({
     files: secondBatch,
   });
-}
 }  
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {

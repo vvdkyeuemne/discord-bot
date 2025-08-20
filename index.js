@@ -3243,63 +3243,55 @@ const images = (pkg.medias || []).filter(
   m => /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
 );
 
-// helper: lấy size (byte). Lỗi -> trả 0 (không chắc).
+// ===== helper: thử lấy dung lượng; -1 = không biết =====
 async function getRemoteSize(url) {
   try {
-    // 1) thử HEAD
-    const h = await axios.head(url, {
-      timeout: 10000,
-      maxRedirects: 5,
-      validateStatus: () => true,
-    });
-    const len = Number(h.headers['content-length'] || 0);
-    if (Number.isFinite(len) && len > 0) return len;
+    // thử HEAD
+    const h = await axios.head(url, { timeout: 10000, maxRedirects: 5, validateStatus: () => true });
+    const len1 = Number(h.headers['content-length'] || 0);
+    if (Number.isFinite(len1) && len1 > 0) return len1;
 
-    // 2) fallback: GET 1 byte để đọc content-range: "bytes 0-0/12345678"
+    // fallback: GET 1 byte để đọc content-range: "bytes 0-0/12345678"
     const g = await axios.get(url, {
       timeout: 10000,
       maxRedirects: 5,
       headers: { Range: 'bytes=0-0' },
       validateStatus: () => true,
     });
-    const cr = g.headers['content-range']; // "bytes 0-0/12345678"
-    if (cr) {
-      const m = cr.match(/\/(\d+)$/);
-      if (m) {
-        const total = Number(m[1]);
-        if (Number.isFinite(total) && total > 0) return total;
-      }
-    }
-  } catch (_) { /* ignore */ }
-  return 0;
+    const cr = g.headers['content-range']; // ví dụ "bytes 0-0/12345678"
+    const m = cr && cr.match(/\/(\d+)$/);
+    const total = m ? Number(m[1]) : 0;
+    if (Number.isFinite(total) && total > 0) return total;
+  } catch (_) {}
+  return -1; // KHÔNG BIẾT
 }
 
-// --- sắp xếp & hợp nhất (ưu tiên video) ---
+const LIMIT = 25 * 1024 * 1024;
+
+// ===== sắp xếp media (ưu tiên video 1080 > 720 > 640 > 540 > 480) =====
 const ordered = [];
 if (videos.length) {
   videos.sort((a, b) => {
     const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
     const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
-    const score = { '1080':5, '720':4, '640':3, '540':2, '480':1 };
+    const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
     return (score[qb] || 0) - (score[qa] || 0);
   });
   ordered.push(...videos);
 }
 if (images.length) ordered.push(...images);
 
-const LIMIT = 25 * 1024 * 1024;
-
-// --- chọn ứng viên có size HỢP LỆ (size > 0 && size ≤ 25MB) ---
+// ===== chọn ứng viên CHẮC CHẮN ≤ 25MB (size > 0 và ≤ LIMIT) =====
 let best = null;
 for (const m of ordered) {
   const sz = await getRemoteSize(m.url);
-  if (sz > 0 && sz <= LIMIT) {
+  if (sz > 0 && sz <= LIMIT) { // chỉ nhận khi biết chắc
     best = m;
     break;
   }
 }
 
-// --- nếu KHÔNG có ứng viên hợp lệ -> chỉ gửi embed + nút mở link ---
+// ===== nếu không chọn được (size -1 hoặc > LIMIT) → chỉ gửi nút mở link =====
 if (!best) {
   const first = ordered[0];
   if (first) {
@@ -3318,10 +3310,10 @@ if (!best) {
   return;
 }
 
-// --- đo lại lần cuối: nếu nghi ngờ/≥25MB -> chỉ gửi nút ---
+// ===== đo lại lần cuối, nếu vẫn không chắc/chắc chắn ≥ 25MB → gửi nút =====
 try {
   const s = await getRemoteSize(best.url);
-  if (!(s > 0 && s <= LIMIT)) {
+  if (s === -1 || s >= LIMIT) {
     const first = ordered[0] || best;
     await msg.reply({
       embeds: [embed],
@@ -3352,7 +3344,7 @@ try {
   return;
 }
 
-// --- chắc chắn ≤25MB -> gửi file ---
+// ===== tới đây CHẮC CHẮN ≤ 25MB → upload file =====
 await msg.channel.send({
   files: [
     {

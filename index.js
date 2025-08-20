@@ -3361,3 +3361,10 @@ await msg.channel.send({
     },
   ],
 });
+
+// (hết phần xử lý chính)
+} catch (e) {
+  console.error('fb auto message error:', e);
+}
+
+}); // <-- đóng listener: client.on('messageCreate', async (msg) => { ... })

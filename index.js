@@ -2117,38 +2117,63 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
 // === /insta handler ===
-if (interaction.commandName === "insta") {
-  const url = interaction.options.getString("url", true);
+if (interaction.commandName === 'insta') {
+  const url = interaction.options.getString('url', true).trim();
 
-  await interaction.deferReply(); // công khai
+  await interaction.deferReply(); // trả lời công khai
 
   try {
-    const { medias, meta } = await fetchInstagram(url);
+    // GỌI ĐÚNG TÊN UTILS
+    const { medias, meta } = await fetchInstagramViaDownr(url);
 
-    if (!medias?.length) {
-      return interaction.editReply("⚠️ Không tải được media từ link Instagram.");
+    if (!Array.isArray(medias) || medias.length === 0) {
+      return interaction.editReply('⚠️ Không tải được media từ link Instagram.');
     }
 
-    // lấy media đầu tiên
-    const media = medias[0];
-
+    // --- Embed thông tin ---
     const embed = new EmbedBuilder()
       .setColor(0xff3399)
-      .setTitle("📷 Instagram Download")
-      .setDescription(`Tác giả: ${meta?.author || "Ẩn danh"}`)
-      .setURL(url)
-      .setFooter({ text: "Nguồn: Instagram" })
-      .setTimestamp();
+      .setTitle('📷 Instagram Downloader')
+      .setDescription(meta?.caption ? (meta.caption.length > 800 ? meta.caption.slice(0, 800) + '…' : meta.caption) : 'Tải thành công! 🎉')
+      .setFooter({ text: `Nguồn: Instagram${meta?.author ? ' • Tác giả: ' + meta.author : ''}` })
+      .setTimestamp(new Date());
 
-    if (media.thumbnail) embed.setImage(media.thumbnail);
+    if (meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
+      embed.setImage(meta.thumbnail);
+    }
+
+    // --- Tạo các nút mở link (tối đa 3) ---
+    const top = medias.slice(0, 3);
+    const row = new ActionRowBuilder().addComponents(
+      ...top.map((m, i) =>
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel(`${m.type === 'video' ? '🎬' : '🖼️'} Mở media ${i + 1}${m.quality ? ' • ' + m.quality : ''}`)
+          .setURL(m.url)
+      )
+    );
 
     await interaction.editReply({
       embeds: [embed],
-      files: [media.url], // gửi file kèm luôn
+      components: [row],
     });
+
+    // Nếu bạn MUỐN thử gửi file nhỏ (tùy chọn), có thể bật đoạn dưới:
+    /*
+    try {
+      const first = medias[0];
+      // dùng HEAD của FB nếu bạn đã có sẵn getRemoteSize; nếu chưa thì bỏ phần này
+      const size = await getRemoteSize(first.url);
+      if (size > 0 && size <= 8 * 1024 * 1024) { // chỉ gửi file <= 8MB cho an toàn
+        await interaction.followUp({
+          files: [{ attachment: first.url, name: first.type === 'video' ? 'instagram.mp4' : 'instagram.jpg' }],
+        });
+      }
+    } catch {}
+    */
   } catch (e) {
-    console.error("insta handler error:", e);
-    return interaction.editReply("⚠️ Có lỗi khi xử lý link Instagram.");
+    console.error('insta handler error:', e);
+    return interaction.editReply('⚠️ Có lỗi khi xử lý link Instagram.');
   }
 }
   

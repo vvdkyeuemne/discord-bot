@@ -2470,13 +2470,16 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ========== Slash command: /fbauto ==========
+// Slash command: /fbauto
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== 'fbauto') return;
-
   try {
-    const mode = interaction.options.getString('mode', true); // 'off' | 'server' | 'channel'
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.commandName !== 'fbauto') return;
+
+    // ⚠️ Quan trọng: defer trước để tránh InteractionNotReplied
+    await interaction.deferReply({ ephemeral: true });
+
+    const mode = interaction.options.getString('mode', true); // off/server/channel
     await loadFacebookSettings();
 
     const gid = interaction.guildId;
@@ -2484,26 +2487,29 @@ client.on('interactionCreate', async (interaction) => {
     const g = fbSettings.guilds[gid];
 
     g.mode = mode;
-    g.channelId = (mode === 'channel') ? interaction.channelId : null;
+    g.channelId = mode === 'channel' ? interaction.channelId : null;
 
     await saveFacebookSettings();
 
     const text =
       mode === 'off'
-        ? '📌 Đã tắt auto tải Facebook trong server.'
+        ? '🛑 Đã tắt auto tải Facebook trong server.'
         : mode === 'server'
-        ? '✅ Đã bật auto Facebook cho toàn server.'
-        : '✅ Đã bật auto Facebook cho **kênh này**.';
+          ? '✅ Đã bật auto Facebook cho toàn server.'
+          : '✅ Đã bật auto Facebook cho **kênh này**.';
 
-   await interaction.editReply({ content: text });      // dùng editReply sau defer
+    await interaction.editReply({ content: text }); // đã defer nên dùng editReply
   } catch (e) {
     console.error('fbauto slash error:', e);
-    if (!interaction.replied) {
-      await interaction.reply({ content: '⚠️ Lỗi khi xử lý /fbauto.', ephemeral: true }).catch(()=>{});
+
+    const errText = '⚠️ Lỗi khi xử lý /fbauto.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({ content: errText }).catch(() => {});
+    } else {
+      await interaction.reply({ content: errText, ephemeral: true }).catch(() => {});
     }
   }
 });
-
 
 // ====================== HÀM CHUNG: lấy dữ liệu & build kết quả ======================
 async function fetchTikTokPayload(inputUrlRaw) {

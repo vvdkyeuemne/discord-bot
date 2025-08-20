@@ -3064,7 +3064,7 @@ let fbSettings = { guilds: {} };
 
 async function loadFacebookSettings() {
   try {
-    const raw = await fs.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
+    const raw = await f.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
     fbSettings = JSON.parse(raw || '{}') || { guilds: {} };
   } catch {
     fbSettings = { guilds: {} };
@@ -3072,7 +3072,7 @@ async function loadFacebookSettings() {
 }
 async function saveFacebookSettings() {
   try {
-    await fs.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
+    await f.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
   } catch (e) {
     console.error('save fb settings error:', e?.message);
   }
@@ -3085,11 +3085,10 @@ loadFacebookSettings().catch(()=>{});
 function isFacebookUrl(text='') {
   return /(https?:\/\/\S*(facebook\.com|fb\.watch|fbcdn\.net|fcontent\.app)\S*)/i.test(String(text));
 }
-function extractFirstUrl(text='') {
+function extractFirstUrl(text = '') {
   const m = String(text).match(/https?:\/\/\S+/i);
-  return m ? m[0] : '';
+  return m?.[0] || '';
 }
-
 // gọi downr để lấy gói media
 async function fetchFacebookPackageFromDownr(rawUrl) {
   let url = String(rawUrl||'').trim();
@@ -3172,6 +3171,8 @@ client.on('messageCreate', async (msg) => {
 
     const url = extractFirstUrl(msg.content);
     if (!url) return;
+    console.log('[fbauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
+await msg.channel.sendTyping();
 
     await msg.channel.sendTyping();
 
@@ -3193,24 +3194,38 @@ client.on('messageCreate', async (msg) => {
 
     await msg.reply({ embeds: [embed] });
 
-    const videos = pkg.medias.filter(m => /video/i.test(m.type || '') || /\.mp4(\?|$)/i.test(m.url || ''));
-    const images = pkg.medias.filter(m => /image/i.test(m.type || '') || /\.(jpg|jpeg|png|webp)(\?|$)/i.test(m.url || ''));
+    // --- lọc danh sách video/ảnh, fallback theo URL nếu thiếu type ---
+const videos = (pkg.medias || []).filter(m =>
+  /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
+);
+const images = (pkg.medias || []).filter(m =>
+  /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+);
 
-    let best = null;
-    if (videos.length) {
-      best = videos.find(v => /(1080|720)/.test(v.resolution || '')) || videos[0];
-    } else if (images.length) {
-      best = images[0];
-    }
-    if (!best) return;
+// --- chọn 'best': ưu tiên mp4 1080/720, nếu không có thì ảnh đầu ---
+let best = null;
 
-    const files = [{
-      attachment: best.url,
-      name: `facebook.${/\.mp4/i.test(best.url) ? 'mp4' : 'jpg'}`
-    }];
+if (videos.length) {
+  videos.sort((a, b) => {
+    const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
+    const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
+    const sc = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
+    return (sc[qb] || 0) - (sc[qa] || 0);
+  });
+  best = videos[0];
+} else if (images.length) {
+  best = images[0];
+}
 
-    await msg.channel.send({ files });
-  } catch (e) {
-    console.error('fb auto message error:', e);
-  }
-});
+if (!best) {
+  console.warn('[fbauto] no medias', pkg);
+  return;
+}
+
+// --- gửi 1 file tốt nhất ---
+const files = [{
+  attachment: best.url,
+  name: `facebook.${/\.mp4(?:\?|$)/i.test(best.url) ? 'mp4' : 'jpg'}`
+}];
+
+await msg.channel.send({ files });

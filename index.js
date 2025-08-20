@@ -2495,11 +2495,11 @@ client.on('interactionCreate', async (interaction) => {
         ? '✅ Đã bật auto Facebook cho toàn server.'
         : '✅ Đã bật auto Facebook cho **kênh này**.';
 
-    await interaction.reply({ content: text, ephemeral: true });
+   await interaction.editReply({ content: text });      // dùng editReply sau defer
   } catch (e) {
-    console.error('❌ fbauto slash error:', e);
+    console.error('fbauto slash error:', e);
     if (!interaction.replied) {
-      await interaction.reply({ content: '⚠️ Lỗi xử lý `/fbauto`.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ Lỗi khi xử lý /fbauto.', ephemeral: true }).catch(()=>{});
     }
   }
 });
@@ -3097,7 +3097,7 @@ let fbSettings = { guilds: {} };
 
 async function loadFacebookSettings() {
   try {
-    const raw = await f.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
+    const raw = await fs.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
     fbSettings = JSON.parse(raw || '{}') || { guilds: {} };
   } catch {
     fbSettings = { guilds: {} };
@@ -3105,7 +3105,7 @@ async function loadFacebookSettings() {
 }
 async function saveFacebookSettings() {
   try {
-    await f.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
+    await fs.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
   } catch (e) {
     console.error('save fb settings error:', e?.message);
   }

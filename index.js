@@ -2142,41 +2142,46 @@ if (interaction.commandName === 'insta') {
       embed.setImage(meta.thumbnail);
     }
 
-    // --- Tạo các nút mở link (tối đa 3) ---
-    const top = medias.slice(0, 3);
-    const row = new ActionRowBuilder().addComponents(
-      ...top.map((m, i) =>
-        new ButtonBuilder()
-          .setStyle(ButtonStyle.Link)
-          .setLabel(`${m.type === 'video' ? '🎬' : '🖼️'} Mở media ${i + 1}${m.quality ? ' • ' + m.quality : ''}`)
-          .setURL(m.url)
-      )
-    );
+ // --- LỌC ẢNH, gửi tối đa 20 tấm ---
+const images = (medias || []).filter(m =>
+  (m.type === 'image') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+).slice(0, 20);
 
-    await interaction.editReply({
-      embeds: [embed],
-      components: [row],
-    });
-
-    // Nếu bạn MUỐN thử gửi file nhỏ (tùy chọn), có thể bật đoạn dưới:
-    /*
-    try {
-      const first = medias[0];
-      // dùng HEAD của FB nếu bạn đã có sẵn getRemoteSize; nếu chưa thì bỏ phần này
-      const size = await getRemoteSize(first.url);
-      if (size > 0 && size <= 8 * 1024 * 1024) { // chỉ gửi file <= 8MB cho an toàn
-        await interaction.followUp({
-          files: [{ attachment: first.url, name: first.type === 'video' ? 'instagram.mp4' : 'instagram.jpg' }],
-        });
-      }
-    } catch {}
-    */
-  } catch (e) {
-    console.error('insta handler error:', e);
-    return interaction.editReply('⚠️ Có lỗi khi xử lý link Instagram.');
-  }
+// nếu không có ảnh -> fallback: dùng thumbnail (nếu có) để vẫn hiện ảnh
+if (!images.length && meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
+  images.push({ url: meta.thumbnail, type: 'image' });
 }
-  
+
+// nếu vẫn không có gì thì báo lỗi nhẹ
+if (!images.length) {
+  return interaction.editReply('⚠️ Bài này không có ảnh để gửi (chỉ có video/REEL).');
+}
+
+// chuẩn bị file đính kèm
+const attachments = images.map((m, i) => ({
+  attachment: m.url,
+  name: `instagram_${String(i + 1).padStart(2, '0')}${
+    /\.(jpe?g|png|webp)(?:\?|$)/i.test(m.url) ? '' : '.jpg'
+  }`,
+}));
+
+// Chia lô 10 file / message
+const firstBatch = attachments.slice(0, 10);
+const secondBatch = attachments.slice(10);
+
+// Gửi embed + lô đầu tiên
+await interaction.editReply({
+  embeds: [embed],
+  files: firstBatch,
+});
+
+// Nếu còn >10 tấm thì gửi tiếp lô thứ 2
+if (secondBatch.length) {
+  await interaction.followUp({
+    files: secondBatch,
+  });
+}
+}  
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();

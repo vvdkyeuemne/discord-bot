@@ -3164,7 +3164,7 @@ async function fetchFacebookPackageFromDownr(rawUrl) {
     return null;
   }
 }
-// Auto bắt link Facebook trong tin nhắn
+// Auto bật link Facebook trong tin nhắn
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
@@ -3182,115 +3182,119 @@ client.on('messageCreate', async (msg) => {
     console.log('[fbauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
     await msg.channel.sendTyping();
 
-    const pkg = await fetchFacebookPackageFromDownr(url);
+    const pkg = await fetchFacebookPackageFromDownrr(url);
     if (!pkg || !pkg.medias || pkg.medias.length === 0) return;
 
     // --- embed thông tin ---
     const title = 'Facebook Downloader';
     const captionText = pkg.caption
-      ? (pkg.caption.length > 800 ? (pkg.caption.slice(0, 800) + '…') : pkg.caption)
+      ? (pkg.caption.length > 800 ? pkg.caption.slice(0, 800) + '…' : pkg.caption)
       : null;
 
     const embed = new EmbedBuilder()
       .setColor(0x1877f2)
-      .setTitle(`⬇️ ${title}`)
+      .setTitle(`📥 ${title}`)
       .setDescription('✅ Tải thành công! 🎉')
       .setFooter({ text: 'Nguồn: Facebook Public Post' })
       .setTimestamp(new Date());
 
-    if (pkg.thumb && /^https?:\/\//i.test(pkg.thumb)) embed.setThumbnail(pkg.thumb);
+    if (pkg.thumb && /^https?:\/\/\S+/i.test(pkg.thumb)) embed.setThumbnail(pkg.thumb);
     if (captionText) embed.addFields({ name: '📖 Caption', value: captionText });
 
     await msg.reply({ embeds: [embed] });
 
-    // --- lọc danh sách media: ưu tiên video ---
-const videos = (pkg.medias || []).filter(m =>
-  /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
-);
+    // --- lọc media: ưu tiên video ---
+    const videos = (pkg.medias || []).filter(
+      m => /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
+    );
+    const images = (pkg.medias || []).filter(
+      m => /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+    );
 
-const images = (pkg.medias || []).filter(m =>
-  /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
-);
+    // helper: HEAD để lấy size (nếu lỗi trả 0)
+    async function getRemoteSize(u) {
+      try {
+        const r = await axios.head(u, {
+          timeout: 10000,
+          maxRedirects: 5,
+          validateStatus: () => true,
+        });
+        const len = Number(r.headers['content-length'] || 0);
+        return Number.isFinite(len) ? len : 0;
+      } catch {
+        return 0;
+      }
+    }
 
-// helper: HEAD để lấy size (nếu không lấy được thì trả 0)
-async function getRemoteSize(url) {
-  try {
-    const r = await axios.head(url, { timeout: 10000, maxRedirects: 5, validateStatus: () => true });
-    const len = Number(r.headers['content-length'] || 0);
-    return Number.isFinite(len) ? len : 0;
-  } catch {
-    return 0;
-  }
-}
+    // --- sắp xếp video theo độ phân giải ---
+    const ordered = [];
+    if (videos.length) {
+      videos.sort((a, b) => {
+        const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
+        const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
+        const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
+        return (score[qb] || 0) - (score[qa] || 0);
+      });
+      ordered.push(...videos);
+    }
+    if (images.length) ordered.push(...images);
 
-// --- chọn "best" theo độ phân giải, cố gắng ≤25MB ---
-let best = null;
-const ordered = [];
-if (videos.length) {
-  videos.sort((a, b) => {
-    const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
-    const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
-    const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
-    return (score[qb] || 0) - (score[qa] || 0);
-  });
-  ordered.push(...videos);
-}
-if (images.length) ordered.push(...images);
+    // --- chọn best ≤25MB (nếu HEAD không lấy được size => coi như hợp lệ) ---
+    let best = null;
+    for (const m of ordered) {
+      const size = await getRemoteSize(m.url);
+      if (!size || size <= 25 * 1024 * 1024) {
+        best = m;
+        break;
+      }
+    }
 
-// lấy cái đầu tiên có size ≤25MB (nếu HEAD trả 0 thì vẫn coi là hợp lệ để thử gửi)
-for (const m of ordered) {
-  const size = await getRemoteSize(m.url);
-  if (!size || size <= 25 * 1024 * 1024) {
-    best = m;
-    break;
-  }
-}
+    // --- nếu KHÔNG có file nào ≤25MB: chỉ gửi embed + nút mở link ---
+    if (!best) {
+      const first = ordered[0];
+      if (!first) return; // không có gì để gửi
+      await msg.reply({
+        embeds: [embed],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setStyle(ButtonStyle.Link)
+              .setLabel('Mở media (quá 25MB)')
+              .setURL(first.url)
+          ),
+        ],
+      });
+      return;
+    }
 
-// --- nếu KHÔNG có file nào ≤25MB: chỉ gửi embed + nút mở link ---
-if (!best) {
-  const first = ordered[0];
-  if (first) {
-    await msg.reply({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setStyle(ButtonStyle.Link)
-            .setLabel('Mở media (quá 25MB)')
-            .setURL(first.url)
-        )
-      ]
-    });
-  }
-  return;
-}
+    // --- guard cuối: nếu best vẫn >25MB thì chỉ gửi nút ---
+    try {
+      const s = await getRemoteSize(best.url);
+      if (s && s > 25 * 1024 * 1024) {
+        await msg.reply({
+          embeds: [embed],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setLabel('Mở media (quá 25MB)')
+                .setURL(best.url)
+            ),
+          ],
+        });
+        return;
+      }
+    } catch {}
 
-// guard lần cuối: nếu best vẫn >25MB thì cũng chỉ gửi nút
-try {
-  const s = await getRemoteSize(best.url);
-  if (s && s > 25 * 1024 * 1024) {
-    await msg.reply({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setStyle(ButtonStyle.Link)
-            .setLabel('Mở media (quá 25MB)')
-            .setURL(best.url)
-        )
-      ]
-    });
-    return;
-  }
-} catch { /* bỏ qua, cứ gửi tiếp */ }
-
-// === có file phù hợp (≤25MB) -> gửi file ===
-const files = [{
-  attachment: best.url,
-  name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg'
-}];
-await msg.channel.send({ files });
+    // --- có file phù hợp (≤25MB) -> gửi file ---
+    const files = [
+      {
+        attachment: best.url,
+        name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg',
+      },
+    ];
+    await msg.channel.send({ files });
   } catch (e) {
     console.error('fb auto message error:', e);
   }
-});
+}); // <-- PHẢI có dòng này để đóng listener

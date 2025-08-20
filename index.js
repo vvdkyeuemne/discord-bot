@@ -687,7 +687,7 @@ new SlashCommandBuilder()
        { name: 'channel (chỉ kênh hiện tại)', value: 'channel' }
      )
   )
-.map(c=>c.toJSON());
+].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
 const GUILD_IDS = ['1403572945389097050','1329819713450278952','1405161470055940186'];

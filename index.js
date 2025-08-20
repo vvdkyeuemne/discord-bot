@@ -48,6 +48,38 @@ import {
   entersState,              // << thêm
 } from '@discordjs/voice';
 
+async function getRemoteSize(url) {
+  try {
+    // thử HEAD
+    const h = await axios.head(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      validateStatus: () => true,
+    });
+    let len = Number(h.headers['content-length'] || 0);
+    if (Number.isFinite(len) && len > 0) return len;
+
+    // fallback: thử GET 1 byte để đọc content-range: "bytes 0-0/12345678"
+    const g = await axios.get(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      headers: { Range: 'bytes=0-0' },
+      validateStatus: () => true,
+    });
+    const cr = g.headers['content-range']; // ví dụ "bytes 0-0/12345678"
+    if (cr) {
+      const m = cr.match(/\/(\d+)$/);
+      if (m) {
+        const total = Number(m[1]);
+        if (Number.isFinite(total) && total > 0) return total;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return 0; // không chắc size
+        }
+
 // ===== Optional tokens
 if (process.env.YT_COOKIE) {
   play.setToken({ youtube: { cookie: process.env.YT_COOKIE } });
@@ -3268,10 +3300,48 @@ client.on('messageCreate', async (msg) => {
     }
 
     // --- guard cuối: nếu KHÔNG lấy được size hoặc size >= 25MB thì chỉ gửi nút ---
+const LIMIT = 25 * 1024 * 1024;
+
+// 1) tách media ưu tiên video (như bạn đang làm)
+// ...
+
+// 2) chọn ứng viên <=25MB (bỏ qua size=0)
+let best = null;
+const ordered = [];
+if (videos.length) ordered.push(...videos);
+if (images.length) ordered.push(...images);
+
+for (const m of ordered) {
+  const sz = await getRemoteSize(m.url);
+  if (sz > 0 && sz <= LIMIT) {  // chỉ nhận khi biết chắc <=25MB
+    best = m;
+    break;
+  }
+}
+
+// 3) nếu chưa chọn được cái nào -> gửi nút
+if (!best) {
+  const first = ordered[0]; // có thể là 1080p
+  if (first) {
+    await msg.reply({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel('Mở media (quá 25MB)')
+            .setURL(first.url)
+        ),
+      ],
+    });
+  }
+  return;
+}
+
+// 4) guard cuối: đo lại, nếu không chắc/chắc chắn >=25MB -> gửi nút
 try {
-  const LIMIT = 25 * 1024 * 1024;
   const s = await getRemoteSize(best.url);
-  if (!s || s >= LIMIT) {                    // <--- CHỖ QUAN TRỌNG
+  if (!s || s >= LIMIT) {
     const first = ordered[0] || best;
     await msg.reply({
       embeds: [embed],
@@ -3281,13 +3351,12 @@ try {
             .setStyle(ButtonStyle.Link)
             .setLabel('Mở media (quá 25MB)')
             .setURL(first.url)
-        )
-      ]
+        ),
+      ],
     });
     return;
   }
-} catch {
-  // Nếu HEAD lỗi -> cũng chỉ gửi nút
+} catch { // lỗi đo size -> cũng chỉ gửi nút
   const first = ordered[0] || best;
   await msg.reply({
     embeds: [embed],
@@ -3297,21 +3366,18 @@ try {
           .setStyle(ButtonStyle.Link)
           .setLabel('Mở media (quá 25MB)')
           .setURL(first.url)
-      )
-    ]
+      ),
+    ],
   });
   return;
 }
 
-    // --- có file phù hợp (≤25MB) -> gửi file ---
-    const files = [
-      {
-        attachment: best.url,
-        name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg',
-      },
-    ];
-    await msg.channel.send({ files });
-  } catch (e) {
-    console.error('fb auto message error:', e);
-  }
-}); // <-- PHẢI có dòng này để đóng listener
+// 5) an toàn rồi -> gửi file
+await msg.channel.send({
+  files: [
+    {
+      attachment: best.url,
+      name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg',
+    },
+  ],
+});

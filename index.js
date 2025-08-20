@@ -3274,4 +3274,3 @@ const files = [{
 }];
 
 await msg.channel.send({ files });
-});

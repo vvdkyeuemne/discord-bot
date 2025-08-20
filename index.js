@@ -3289,5 +3289,8 @@ const files = [{
   attachment: best.url,
   name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg'
 }];
-
 await msg.channel.send({ files });
+  } catch (e) {
+    console.error('fb auto message error:', e);
+  }
+});

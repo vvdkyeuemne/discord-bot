@@ -3182,7 +3182,7 @@ client.on('messageCreate', async (msg) => {
     console.log('[fbauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
     await msg.channel.sendTyping();
 
-    const pkg = await fetchFacebookPackageFromDownrr(url);
+    const pkg = await fetchFacebookPackageFromDownr(url);
     if (!pkg || !pkg.medias || pkg.medias.length === 0) return;
 
     // --- embed thông tin ---

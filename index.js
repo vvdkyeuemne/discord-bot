@@ -3274,32 +3274,32 @@ async function getRemoteSize(url) {
   return 0;
 }
 
-// --- xếp video theo độ phân giải (1080 > 720 > 640 > 540 > 480) ---
+// --- sắp xếp & hợp nhất (ưu tiên video) ---
 const ordered = [];
 if (videos.length) {
   videos.sort((a, b) => {
     const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
     const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
-    const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
+    const score = { '1080':5, '720':4, '640':3, '540':2, '480':1 };
     return (score[qb] || 0) - (score[qa] || 0);
   });
   ordered.push(...videos);
 }
 if (images.length) ordered.push(...images);
 
-// --- chọn ứng viên CHẮC CHẮN ≤ 25MB ---
 const LIMIT = 25 * 1024 * 1024;
-let best = null;
 
+// --- chọn ứng viên có size HỢP LỆ (size > 0 && size ≤ 25MB) ---
+let best = null;
 for (const m of ordered) {
   const sz = await getRemoteSize(m.url);
-  if (sz > 0 && sz <= LIMIT) { // chỉ nhận khi biết chắc ≤25MB
+  if (sz > 0 && sz <= LIMIT) {
     best = m;
     break;
   }
 }
 
-// --- nếu KHÔNG có file nào ≤25MB -> chỉ gửi nút mở link ---
+// --- nếu KHÔNG có ứng viên hợp lệ -> chỉ gửi embed + nút mở link ---
 if (!best) {
   const first = ordered[0];
   if (first) {
@@ -3318,10 +3318,10 @@ if (!best) {
   return;
 }
 
-// --- guard cuối (phòng hờ): đo lại, nếu vẫn không chắc/chắc chắn ≥25MB -> gửi nút ---
+// --- đo lại lần cuối: nếu nghi ngờ/≥25MB -> chỉ gửi nút ---
 try {
   const s = await getRemoteSize(best.url);
-  if (!s || s >= LIMIT) {
+  if (!(s > 0 && s <= LIMIT)) {
     const first = ordered[0] || best;
     await msg.reply({
       embeds: [embed],
@@ -3352,7 +3352,7 @@ try {
   return;
 }
 
-// --- tới đây chắc chắn ≤25MB -> gửi file lên Discord ---
+// --- chắc chắn ≤25MB -> gửi file ---
 await msg.channel.send({
   files: [
     {
@@ -3361,7 +3361,6 @@ await msg.channel.send({
     },
   ],
 });
-
 // (hết phần xử lý chính)
 } catch (e) {
   console.error('fb auto message error:', e);

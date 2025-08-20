@@ -3064,7 +3064,7 @@ let fbSettings = { guilds: {} };
 
 async function loadFacebookSettings() {
   try {
-    const raw = await f.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
+    const raw = await fs.readFile(FACEBOOK_SETTINGS_FILE, 'utf8');
     fbSettings = JSON.parse(raw || '{}') || { guilds: {} };
   } catch {
     fbSettings = { guilds: {} };
@@ -3072,7 +3072,7 @@ async function loadFacebookSettings() {
 }
 async function saveFacebookSettings() {
   try {
-    await f.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
+    await fs.writeFile(FACEBOOK_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2), 'utf8');
   } catch (e) {
     console.error('save fb settings error:', e?.message);
   }

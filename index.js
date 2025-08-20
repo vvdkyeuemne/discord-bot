@@ -3274,3 +3274,7 @@ const files = [{
 }];
 
 await msg.channel.send({ files });
+} catch (e) {
+  console.error('fb auto message error:', e);
+}
+});

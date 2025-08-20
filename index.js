@@ -3317,8 +3317,7 @@ try {
     ]
   });
   return;
-}
-    } catch {}
+  }
 
     // --- có file phù hợp (≤25MB) -> gửi file ---
     const files = [

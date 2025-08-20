@@ -2470,6 +2470,39 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+// ========== Slash command: /fbauto ==========
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== 'fbauto') return;
+
+  try {
+    const mode = interaction.options.getString('mode', true); // 'off' | 'server' | 'channel'
+    await loadFacebookSettings();
+
+    const gid = interaction.guildId;
+    if (!fbSettings.guilds[gid]) fbSettings.guilds[gid] = {};
+    const g = fbSettings.guilds[gid];
+
+    g.mode = mode;
+    g.channelId = (mode === 'channel') ? interaction.channelId : null;
+
+    await saveFacebookSettings();
+
+    const text =
+      mode === 'off'
+        ? '📌 Đã tắt auto tải Facebook trong server.'
+        : mode === 'server'
+        ? '✅ Đã bật auto Facebook cho toàn server.'
+        : '✅ Đã bật auto Facebook cho **kênh này**.';
+
+    await interaction.reply({ content: text, ephemeral: true });
+  } catch (e) {
+    console.error('❌ fbauto slash error:', e);
+    if (!interaction.replied) {
+      await interaction.reply({ content: '⚠️ Lỗi xử lý `/fbauto`.', ephemeral: true });
+    }
+  }
+});
 
 
 // ====================== HÀM CHUNG: lấy dữ liệu & build kết quả ======================

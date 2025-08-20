@@ -3236,92 +3236,72 @@ client.on('messageCreate', async (msg) => {
     await msg.reply({ embeds: [embed] });
 
     // --- lọc media: ưu tiên video ---
-    const videos = (pkg.medias || []).filter(
-      m => /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
-    );
-    const images = (pkg.medias || []).filter(
-      m => /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
-    );
+const videos = (pkg.medias || []).filter(
+  m => /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
+);
+const images = (pkg.medias || []).filter(
+  m => /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+);
 
-    // helper: HEAD để lấy size (nếu lỗi trả 0)
-    async function getRemoteSize(u) {
-      try {
-        const r = await axios.head(u, {
-          timeout: 10000,
-          maxRedirects: 5,
-          validateStatus: () => true,
-        });
-        const len = Number(r.headers['content-length'] || 0);
-        return Number.isFinite(len) ? len : 0;
-      } catch {
-        return 0;
+// helper: lấy size (byte). Lỗi -> trả 0 (không chắc).
+async function getRemoteSize(url) {
+  try {
+    // 1) thử HEAD
+    const h = await axios.head(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      validateStatus: () => true,
+    });
+    const len = Number(h.headers['content-length'] || 0);
+    if (Number.isFinite(len) && len > 0) return len;
+
+    // 2) fallback: GET 1 byte để đọc content-range: "bytes 0-0/12345678"
+    const g = await axios.get(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      headers: { Range: 'bytes=0-0' },
+      validateStatus: () => true,
+    });
+    const cr = g.headers['content-range']; // "bytes 0-0/12345678"
+    if (cr) {
+      const m = cr.match(/\/(\d+)$/);
+      if (m) {
+        const total = Number(m[1]);
+        if (Number.isFinite(total) && total > 0) return total;
       }
     }
+  } catch (_) { /* ignore */ }
+  return 0;
+}
 
-    // --- sắp xếp video theo độ phân giải ---
-    const ordered = [];
-    if (videos.length) {
-      videos.sort((a, b) => {
-        const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
-        const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
-        const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
-        return (score[qb] || 0) - (score[qa] || 0);
-      });
-      ordered.push(...videos);
-    }
-    if (images.length) ordered.push(...images);
-
-    // --- chọn best ≤25MB (nếu HEAD không lấy được size => coi như hợp lệ) ---
-    let best = null;
-    for (const m of ordered) {
-      const size = await getRemoteSize(m.url);
-      if (!size || size <= 25 * 1024 * 1024) {
-        best = m;
-        break;
-      }
-    }
-
-    // --- nếu KHÔNG có file nào ≤25MB: chỉ gửi embed + nút mở link ---
-    if (!best) {
-      const first = ordered[0];
-      if (!first) return; // không có gì để gửi
-      await msg.reply({
-        embeds: [embed],
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setStyle(ButtonStyle.Link)
-              .setLabel('Mở media (quá 25MB)')
-              .setURL(first.url)
-          ),
-        ],
-      });
-      return;
-    }
-
-    // --- guard cuối: nếu KHÔNG lấy được size hoặc size >= 25MB thì chỉ gửi nút ---
-const LIMIT = 25 * 1024 * 1024;
-
-// 1) tách media ưu tiên video (như bạn đang làm)
-// ...
-
-// 2) chọn ứng viên <=25MB (bỏ qua size=0)
-let best = null;
+// --- xếp video theo độ phân giải (1080 > 720 > 640 > 540 > 480) ---
 const ordered = [];
-if (videos.length) ordered.push(...videos);
+if (videos.length) {
+  videos.sort((a, b) => {
+    const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
+    const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
+    const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
+    return (score[qb] || 0) - (score[qa] || 0);
+  });
+  ordered.push(...videos);
+}
 if (images.length) ordered.push(...images);
+
+// --- chọn ứng viên CHẮC CHẮN ≤ 25MB ---
+const LIMIT = 25 * 1024 * 1024;
+let best = null;
 
 for (const m of ordered) {
   const sz = await getRemoteSize(m.url);
-  if (sz > 0 && sz <= LIMIT) {  // chỉ nhận khi biết chắc <=25MB
+  if (sz > 0 && sz <= LIMIT) { // chỉ nhận khi biết chắc ≤25MB
     best = m;
     break;
   }
 }
 
-// 3) nếu chưa chọn được cái nào -> gửi nút
+// --- nếu KHÔNG có file nào ≤25MB -> chỉ gửi nút mở link ---
 if (!best) {
-  const first = ordered[0]; // có thể là 1080p
+  const first = ordered[0];
   if (first) {
     await msg.reply({
       embeds: [embed],
@@ -3338,7 +3318,7 @@ if (!best) {
   return;
 }
 
-// 4) guard cuối: đo lại, nếu không chắc/chắc chắn >=25MB -> gửi nút
+// --- guard cuối (phòng hờ): đo lại, nếu vẫn không chắc/chắc chắn ≥25MB -> gửi nút ---
 try {
   const s = await getRemoteSize(best.url);
   if (!s || s >= LIMIT) {
@@ -3356,7 +3336,7 @@ try {
     });
     return;
   }
-} catch { // lỗi đo size -> cũng chỉ gửi nút
+} catch (_) {
   const first = ordered[0] || best;
   await msg.reply({
     embeds: [embed],
@@ -3372,7 +3352,7 @@ try {
   return;
 }
 
-// 5) an toàn rồi -> gửi file
+// --- tới đây chắc chắn ≤25MB -> gửi file lên Discord ---
 await msg.channel.send({
   files: [
     {

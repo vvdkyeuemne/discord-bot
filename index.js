@@ -3245,15 +3245,18 @@ if (images.length) ordered.push(...images);
 // chọn cái đầu tiên có size phù hợp
 for (const m of ordered) {
   const size = await getRemoteSize(m.url);
-  if (!size || size <= 25 * 1024 * 1024) {   // trực tiếp 25MB
-    best = m;
-    break;
+  if (size && size <= 25 * 1024 * 1024) {
+  best = m;
+  break;
 }
 }
-
 if (!best) {
-  // Tất cả đều quá 25MB → chỉ gửi embed + nút mở link
-  const first = ordered[0];
+  // --- Final guard: nếu file chọn > 25MB thì không gửi file, chỉ gửi nút mở link ---
+const LIMIT = 25 * 1024 * 1024;
+let finalSize = 0;
+try { finalSize = await getRemoteSize(best.url); } catch {}
+if (finalSize && finalSize > LIMIT) {
+  const first = ordered[0] || best;
   await msg.reply({
     embeds: [embed],
     components: [

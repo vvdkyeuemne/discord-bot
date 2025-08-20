@@ -3211,32 +3211,67 @@ client.on('messageCreate', async (msg) => {
       /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
     );
 
-    // chọn "best": ưu tiên mp4 1080/720, nếu không có thì ảnh đầu
-    let best = null;
-    if (videos.length) {
-      videos.sort((a, b) => {
-        const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
-        const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
-        const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
-        return (score[qb] || 0) - (score[qa] || 0);
-      });
-      best = videos[0];
-    } else if (images.length) {
-      best = images[0];
-    }
+    const MAX_DISCORD_UPLOAD = 24 * 1024 * 1024; // ~24MB để dư địa
 
-    if (!best) {
-      console.warn('[fbauto] no medias', pkg);
-      return;
-    }
-console.log('[fbauto] sending', { thumb: pkg.thumb, medias: pkg.medias.length }); // <-- LOG 3
-    const files = [{
-      attachment: best.url,
-      name: `facebook.${/\.mp4(?:\?|$)/i.test(best.url) ? 'mp4' : 'jpg'}`
-    }];
-
-    await msg.channel.send({ files });
-  } catch (e) {
-    console.error('fb auto message error:', e);
+async function getRemoteSize(url) {
+  try {
+    const r = await axios.head(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      validateStatus: () => true
+    });
+    const len = Number(r.headers['content-length'] || 0);
+    return Number.isFinite(len) ? len : 0;
+  } catch {
+    return 0; // nếu không lấy được size thì coi như nhỏ (để thử gửi)
   }
+}
+   // --- chọn "best" có xét dung lượng < 25MB ---
+let best = null;
+
+// sắp xếp video theo độ phân giải (1080 > 720 > 640 > 540 > 480)
+const ordered = [];
+if (videos.length) {
+  videos.sort((a, b) => {
+    const qa = /(1080|720|640|540|480)/.exec(a.url || '')?.[1] ?? '';
+    const qb = /(1080|720|640|540|480)/.exec(b.url || '')?.[1] ?? '';
+    const score = { '1080': 5, '720': 4, '640': 3, '540': 2, '480': 1 };
+    return (score[qb] || 0) - (score[qa] || 0);
+  });
+  ordered.push(...videos);
+}
+if (images.length) ordered.push(...images);
+
+// chọn cái đầu tiên có size phù hợp
+for (const m of ordered) {
+  const size = await getRemoteSize(m.url);
+  if (!size || size <= 25 * 1024 * 1024) {   // trực tiếp 25MB
+    best = m;
+    break;
+}
+}
+
+if (!best) {
+  // Tất cả đều quá 25MB → chỉ gửi embed + nút mở link
+  const first = ordered[0];
+  await msg.reply({
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel('Mở media (quá 25MB)')
+          .setURL(first.url)
+      )
+    ]
+  });
+  return;
+}
+// === có file phù hợp (≤25MB) -> gửi file ===
+const files = [{
+  attachment: best.url,
+  name: /\.mp4(\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg'
+}];
+
+await msg.channel.send({ files });
 });

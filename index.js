@@ -3302,22 +3302,6 @@ try {
   });
   return;
 }
-} catch {
-  // Nếu HEAD lỗi -> cũng chỉ gửi nút
-  const first = ordered[0] || best;
-  await msg.reply({
-    embeds: [embed],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setStyle(ButtonStyle.Link)
-          .setLabel('Mở media (quá 25MB)')
-          .setURL(first.url)
-      )
-    ]
-  });
-  return;
-  }
 
     // --- có file phù hợp (≤25MB) -> gửi file ---
     const files = [

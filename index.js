@@ -3234,8 +3234,7 @@ client.on('messageCreate', async (msg) => {
     if (captionText) embed.addFields({ name: '📖 Caption', value: captionText });
 
     await msg.reply({ embeds: [embed] });
-
-    // --- lọc media: ưu tiên video ---
+// --- lọc media: ưu tiên video ---
 const videos = (pkg.medias || []).filter(
   m => /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '')
 );
@@ -3243,32 +3242,32 @@ const images = (pkg.medias || []).filter(
   m => /image/i.test(m.type || '') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
 );
 
-// ===== helper: thử lấy dung lượng; -1 = không biết =====
+// helper lấy size: trả -1 nếu không xác định được
 async function getRemoteSize(url) {
   try {
-    // thử HEAD
     const h = await axios.head(url, { timeout: 10000, maxRedirects: 5, validateStatus: () => true });
-    const len1 = Number(h.headers['content-length'] || 0);
-    if (Number.isFinite(len1) && len1 > 0) return len1;
+    const len = Number(h.headers['content-length'] || 0);
+    if (Number.isFinite(len) && len > 0) return len;
 
-    // fallback: GET 1 byte để đọc content-range: "bytes 0-0/12345678"
+    // fallback: GET 1 byte để đọc content-range
     const g = await axios.get(url, {
       timeout: 10000,
       maxRedirects: 5,
       headers: { Range: 'bytes=0-0' },
-      validateStatus: () => true,
+      validateStatus: () => true
     });
-    const cr = g.headers['content-range']; // ví dụ "bytes 0-0/12345678"
-    const m = cr && cr.match(/\/(\d+)$/);
-    const total = m ? Number(m[1]) : 0;
-    if (Number.isFinite(total) && total > 0) return total;
-  } catch (_) {}
-  return -1; // KHÔNG BIẾT
+    const m = (g.headers['content-range'] || '').match(/\/(\d+)$/);
+    if (m) {
+      const total = Number(m[1]);
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+  } catch {}
+  return -1;
 }
 
 const LIMIT = 25 * 1024 * 1024;
 
-// ===== sắp xếp media (ưu tiên video 1080 > 720 > 640 > 540 > 480) =====
+// sắp xếp ưu tiên video theo độ phân giải 1080 > 720 > 640 > 540 > 480
 const ordered = [];
 if (videos.length) {
   videos.sort((a, b) => {
@@ -3281,17 +3280,17 @@ if (videos.length) {
 }
 if (images.length) ordered.push(...images);
 
-// ===== chọn ứng viên CHẮC CHẮN ≤ 25MB (size > 0 và ≤ LIMIT) =====
+// chọn ứng viên CHẮC CHẮN ≤25MB (sz > 0 && sz ≤ LIMIT)
 let best = null;
 for (const m of ordered) {
   const sz = await getRemoteSize(m.url);
-  if (sz > 0 && sz <= LIMIT) { // chỉ nhận khi biết chắc
+  if (sz > 0 && sz <= LIMIT) {
     best = m;
     break;
   }
 }
 
-// ===== nếu không chọn được (size -1 hoặc > LIMIT) → chỉ gửi nút mở link =====
+// nếu không có file nào ≤25MB -> chỉ gửi embed + nút mở link & return
 if (!best) {
   const first = ordered[0];
   if (first) {
@@ -3303,14 +3302,14 @@ if (!best) {
             .setStyle(ButtonStyle.Link)
             .setLabel('Mở media (quá 25MB)')
             .setURL(first.url)
-        ),
-      ],
+        )
+      ]
     });
   }
   return;
 }
 
-// ===== đo lại lần cuối, nếu vẫn không chắc/chắc chắn ≥ 25MB → gửi nút =====
+// đo lại lần cuối; nếu không chắc (-1) hoặc >=25MB -> chỉ gửi nút & return
 try {
   const s = await getRemoteSize(best.url);
   if (s === -1 || s >= LIMIT) {
@@ -3323,12 +3322,12 @@ try {
             .setStyle(ButtonStyle.Link)
             .setLabel('Mở media (quá 25MB)')
             .setURL(first.url)
-        ),
-      ],
+        )
+      ]
     });
     return;
   }
-} catch (_) {
+} catch {
   const first = ordered[0] || best;
   await msg.reply({
     embeds: [embed],
@@ -3338,22 +3337,22 @@ try {
           .setStyle(ButtonStyle.Link)
           .setLabel('Mở media (quá 25MB)')
           .setURL(first.url)
-      ),
-    ],
+      )
+    ]
   });
   return;
 }
 
-// ===== tới đây CHẮC CHẮN ≤ 25MB → upload file =====
+// tới đây CHẮC CHẮN ≤25MB -> upload file
 await msg.channel.send({
   files: [
     {
       attachment: best.url,
-      name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg',
-    },
-  ],
+      name: /\.mp4(?:\?|$)/i.test(best.url) ? 'facebook.mp4' : 'facebook.jpg'
+    }
+  ]
 });
-// (hết phần xử lý chính)
+    // (hết phần xử lý chính)
 } catch (e) {
   console.error('fb auto message error:', e);
 }

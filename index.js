@@ -2116,14 +2116,14 @@ return interaction.editReply({ embeds: [embed] });
 }   // <-- kết thúc try/catch
 }   // <-- kết thúc if (interaction.commandName === 'tiktokinfo')
 
-// === /insta handler ===
+  // === /insta handler ===
 if (interaction.commandName === 'insta') {
   const url = interaction.options.getString('url', true).trim();
 
   await interaction.deferReply(); // trả lời công khai
 
   try {
-    // GỌI ĐÚNG TÊN UTILS
+    // GỌI DÙNG TIỆN ÍCH
     const { medias, meta } = await fetchInstagramViaDownr(url);
 
     if (!Array.isArray(medias) || medias.length === 0) {
@@ -2134,53 +2134,63 @@ if (interaction.commandName === 'insta') {
     const embed = new EmbedBuilder()
       .setColor(0xff3399)
       .setTitle('📷 Instagram Downloader')
-      .setDescription(meta?.caption ? (meta.caption.length > 800 ? meta.caption.slice(0, 800) + '…' : meta.caption) : 'Tải thành công! 🎉')
-      .setFooter({ text: `Nguồn: Instagram${meta?.author ? ' • Tác giả: ' + meta.author : ''}` })
+      .setDescription(
+        meta?.caption
+          ? (meta.caption.length > 800 ? meta.caption.slice(0, 800) + '…' : meta.caption)
+          : 'Tải thành công!'
+      )
+      .setFooter({ text: `Nguồn: Instagram${meta?.author ? ` • Tác giả: ${meta.author}` : ''}` })
       .setTimestamp(new Date());
 
     if (meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
       embed.setImage(meta.thumbnail);
     }
 
- // --- LỌC ẢNH, gửi tối đa 20 tấm ---
-const images = (medias || []).filter(m =>
-  (m.type === 'image') || /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
-).slice(0, 20);
+    // --- LỌC ẢNH, gửi tối đa 20 tấm ---
+    const images = (medias || [])
+      .filter(m =>
+        (m.type === 'image') ||
+        /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+      )
+      .slice(0, 20);
 
-// nếu không có ảnh -> fallback: dùng thumbnail (nếu có) để vẫn hiện ảnh
-if (!images.length && meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
-  images.push({ url: meta.thumbnail, type: 'image' });
-}
+    // nếu không có ảnh: fallback dùng thumbnail (nếu có)
+    if (!images.length && meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
+      images.push({ url: meta.thumbnail, type: 'image' });
+    }
 
-// nếu vẫn không có gì thì báo lỗi nhẹ
-if (!images.length) {
-  return interaction.editReply('⚠️ Bài này không có ảnh để gửi (chỉ có video/REEL).');
-}
+    if (!images.length) {
+      return interaction.editReply('⚠️ Bài này không có ảnh để gửi (chỉ có video/REEL).');
+    }
 
-// chuẩn bị file đính kèm
-const attachments = images.map((m, i) => ({
-  attachment: m.url,
-  name: `instagram_${String(i + 1).padStart(2, '0')}${
-    /\.(jpe?g|png|webp)(?:\?|$)/i.test(m.url) ? '' : '.jpg'
-  }`,
-}));
+    // chuẩn bị file đính kèm
+    const attachments = images.map((m, i) => ({
+      attachment: m.url,
+      name: `instagram_${String(i + 1).padStart(2, '0')}${
+        /\.(jpe?g|png|webp)(?:\?|$)/i.test(m.url || '') ? '' : '.jpg'
+      }`,
+    }));
 
-// Chia lô 10 file / message
-const firstBatch = attachments.slice(0, 10);
-const secondBatch = attachments.slice(10);
+    // Discord giới hạn 10 file / message => tách 2 đợt
+    const firstBatch  = attachments.slice(0, 10);
+    const secondBatch = attachments.slice(10);
 
-// Gửi embed + lô đầu tiên
-await interaction.editReply({
-  embeds: [embed],
-  files: firstBatch,
-});
+    await interaction.editReply({ embeds: [embed], files: firstBatch });
 
-// Nếu còn >10 tấm thì gửi tiếp lô thứ 2
-if (secondBatch.length) {
-  await interaction.followUp({
-    files: secondBatch,
-  });
-}  
+    if (secondBatch.length) {
+      await interaction.followUp({ files: secondBatch });
+    }
+
+  } catch (e) {
+    console.error('insta handler error:', e);
+    const msg = '⚠️ Có lỗi khi xử lý link Instagram.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(msg);
+    } else {
+      await interaction.reply({ content: msg, ephemeral: true });
+    }
+  }
+} // <--- nhớ đóng block của /insta
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();

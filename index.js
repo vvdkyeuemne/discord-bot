@@ -951,9 +951,7 @@ if (interaction.isButton() && interaction.customId?.startsWith('tx_')) {
           )
         );
       return interaction.showModal(modal);
-    }
-  } catch (e) {
-    console.error('TX button error:', e);
+  }
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({ content:'❌ Lỗi xử lý nút.', ephemeral:true }).catch(()=>{});
     }
@@ -1155,11 +1153,12 @@ if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
 
       st.moves.set(`${round}-${interaction.user.id}`, move);
       return interaction.reply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral: true });
-   }
+   
     if (!interaction.replied && !interaction.deferred) {
       interaction.reply({ content: '❌ Lỗi xử lý nút.', ephemeral: true }).catch(() => {});
     }
   }
+    }
   return; // chặn không rơi xuống các handler khác
 }
     

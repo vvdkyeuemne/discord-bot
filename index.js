@@ -200,7 +200,6 @@ async function loadJsonSafe(file, fallback) {
 async function saveJsonSafe(file, obj) { try { await fs.writeFile(file, JSON.stringify(obj, null, 2)); } catch {} }
 async function loadAll() { wins = await loadJsonSafe(DATA_FILE, {}); welcomes = await loadJsonSafe(WELCOME_FILE, {}); coins = await loadJsonSafe(COIN_FILE, {}); }
 async function saveWins(){ await saveJsonSafe(DATA_FILE, wins); }
-async function saveWelcomes(){ await saveJsonSafe(WELCOME_FILE, welcomes); }
 function ensureGuild(gid){ if(!wins[gid]) wins[gid] = {}; }
 function addWin(gid, uid){ ensureGuild(gid); wins[gid][uid] = (wins[gid][uid] || 0) + 1; return wins[gid][uid]; }
 function getTop(gid, limit=10){ ensureGuild(gid); const arr = Object.entries(wins[gid]); arr.sort((a,b)=>b[1]-a[1]); return arr.slice(0,limit); }

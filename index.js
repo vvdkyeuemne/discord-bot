@@ -839,23 +839,19 @@ rowDisabled(roundId){
 const sendnotiTemp = new Map();
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Buttons
+ // ----- Buttons handler (Tài Xỉu) -----
 if (interaction.isButton()) {
   try {
-    // chỉ xử lý các nút của Tài Xỉu
-    if (!interaction.customId.startsWith('tx_')) return;
+    const id = String(interaction.customId || '');
+    // Chỉ xử lý các nút của Tài Xỉu
+    if (!id.startsWith('tx_')) return;
 
-    // tx_bet_tai_<roundId> | tx_bet_xiu_<roundId> | tx_dealer_<roundId>
-    const [prefix, action, a3, a4] = interaction.customId.split('_');
-    let side = null;
-    let roundId = null;
-
-    if (action === 'bet') {
-      side = a3;        // 'tai' | 'xiu'
-      roundId = a4;     // '<roundId>'
-    } else {
-      roundId = a3;     // '<roundId>'
-    }
+    // id có dạng:
+    //  tx_bet_tai_<roundId> | tx_bet_xiu_<roundId> | tx_dealer_<roundId>
+    const parts   = id.split('_');         // ["tx","bet","tai","<roundId>"] | ["tx","dealer","<roundId>"]
+    const action  = parts[1];              // "bet" | "dealer"
+    const side    = action === 'bet' ? parts[2] : null;   // "tai" | "xiu" | null
+    const roundId = action === 'bet' ? parts[3] : parts[2];
 
     const s = taiXiuState.get(interaction.guild.id);
     if (!s || String(s.roundId) !== String(roundId)) {
@@ -884,7 +880,7 @@ if (interaction.isButton()) {
     if (action === 'bet') {
       const modal = new ModalBuilder()
         .setCustomId(`tx_modal_${side}_${roundId}`)
-        .setTitle(`${side === 'tai' ? 'TÀI' : 'XỈU'}`)
+        .setTitle(side === 'tai' ? 'ĐẶT TÀI' : 'ĐẶT XỈU')
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
@@ -899,7 +895,7 @@ if (interaction.isButton()) {
       return interaction.showModal(modal);
     }
   } catch (e) {
-    // tránh crash nếu có lỗi lẻ
+    console.error('Button handler error:', e);
   }
 }
       if (interaction.customId === 'meme_refresh') {

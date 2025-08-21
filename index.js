@@ -93,29 +93,67 @@ const WELCOME_FILE = path.join(process.cwd(), 'welcome.json');
 
 let wins = {};
 let welcomes = {};
+async function saveWelcomes() {
+  try {
+    await fs.writeFile(WELCOME_FILE, JSON.stringify(welcomes, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('saveWelcomes error:', e?.message || e);
+  }
+}
+// Tạo payload chào mừng (embed + content tuỳ chỉnh)
+function buildWelcomePayload(member, data, { demo = false } = {}) {
+  const guild = member.guild;
+  const countFmt = new Intl.NumberFormat('vi-VN').format(guild.memberCount);
+
+  const avatar  = member.user.displayAvatarURL({ size: 512 });
+  const iconURL = guild.iconURL?.({ size: 256 }) || null;
+  const banner  = guild.bannerURL?.({ size: 1024 }) || null;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x00D084)
+    .setTitle(demo ? '🧪 (Demo) chào mừng' : '🎉 Chào mừng thành viên mới!')
+    .setDescription(
+      `Xin chào ${member}!\n` +
+      `Chào mừng bạn đến với **${guild.name}**.\n` +
+      `Bạn là thành viên thứ **${countFmt}** ✨`
+    )
+    .setThumbnail(avatar)
+    .setTimestamp();
+
+  if (iconURL) embed.setAuthor({ name: guild.name, iconURL });
+  if (banner)  embed.setImage(banner);
+
+  // Thay thế placeholder trong thông điệp tuỳ chỉnh
+  let custom = String(data?.message || '')
+    .replaceAll('{member}', `${member}`)
+    .replaceAll('{server}', guild.name)
+    .replaceAll('{count}', countFmt)
+    .trim();
+
+  return {
+    content: custom ? `*${custom}*` : null,
+    embeds: [embed],
+  };
+}
 client.on('guildMemberAdd', async (member) => {
   try {
     const data = welcomes[member.guild.id];
-    if (!data) return;                     // chưa cấu hình
-    const guild = member.guild;
-    const count = guild.memberCount;
+    if (!data) return; // chưa cấu hình
 
     // Lấy channel: ưu tiên cache, fallback fetch
-    let ch = guild.channels.cache.get(data.channelId);
+    let ch = member.guild.channels.cache.get(data.channelId);
     if (!ch) {
-      try { ch = await guild.channels.fetch(data.channelId).catch(() => null); } catch {}
+      try { ch = await member.guild.channels.fetch(data.channelId).catch(() => null); } catch {}
     }
     if (!ch || !ch.isTextBased?.()) return;
 
-    const msg =
-      data.message ||
-      `Chào mừng ${member} đến với **${guild.name}**! Bạn là thành viên thứ **${count}** 🎉`;
-
-    await ch.send(msg);
+    const payload = buildWelcomePayload(member, data, { demo: false });
+    await ch.send(payload);
   } catch (e) {
     console.error('❌ Không gửi được welcome:', e);
   }
 });
+
 const COIN_FILE = path.join(process.cwd(), 'coins.json');
 let coins = {};
 
@@ -1422,22 +1460,23 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       return interaction.reply({ embeds:[embed], components: buttons.components.length?[buttons]:[] });
     }
 
-    // ===== /setwelcome =====
-if (interaction.commandName === 'setwelcome') {
-  // v14: PermissionFlagsBits.Administrator
+    if (interaction.commandName === 'setwelcome') {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
     return interaction.reply({ content: '❌ Cần quyền **Administrator**.', ephemeral: true });
   }
 
   const ch = interaction.options.getChannel('channel', true);
-  const message =
-    interaction.options.getString('message') ||
-    'Chào mừng {user} đến với **{server}**! Bạn là thành viên thứ **{count}** 🎉';
+  const message = interaction.options.getString('message') || '';
 
   welcomes[interaction.guildId] = { channelId: ch.id, message };
-  await saveWelcomes();
+  await saveWelcomes?.(); // nếu bạn đã có hàm này
+  // nếu chưa có, dán hàm ở cuối trả lời này
 
-  return interaction.reply({ content: `✅ Đã bật chào mừng tại <#${ch.id}>.`, ephemeral: true });
+  return interaction.reply({
+    content: `✅ Đã bật chào mừng tại <#${ch.id}>.\n` +
+             `• Thông điệp: ${message ? `\`${message}\`` : '_(để trống)_'}`,
+    ephemeral: true
+  });
 }
     if (interaction.commandName === 'disablewelcome') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
@@ -1445,66 +1484,34 @@ if (interaction.commandName === 'setwelcome') {
       delete welcomes[interaction.guildId]; await saveWelcomes();
       return interaction.reply('🛑 Đã tắt thông báo chào mừng.');
     }
-    // ===== /testwelcome =====
-if (interaction.commandName === 'testwelcome') {
+    if (interaction.commandName === 'testwelcome') {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
     return interaction.reply({ content: '❌ Cần quyền **Administrator**.', ephemeral: true });
   }
 
-  // 1) Lấy config
-  const cfg = welcomes?.[interaction.guildId];
-  if (!cfg?.channelId) {
-    return interaction.reply({
-      content: '⚠️ Chưa cấu hình kênh chào mừng. Dùng `/setwelcome` trước nhé.',
-      ephemeral: true
-    });
+  const data = welcomes[interaction.guildId];
+  if (!data) {
+    return interaction.reply({ content: '⚠️ Chưa cấu hình chào mừng. Dùng `/setwelcome` trước.', ephemeral: true });
   }
 
-  await interaction.deferReply({ ephemeral: true });
-
-  // 2) Lấy kênh & check quyền
-  let channel = interaction.client.channels.cache.get(cfg.channelId);
-  if (!channel) {
-    try { channel = await interaction.client.channels.fetch(cfg.channelId); } catch {}
+  // Lấy channel đã cấu hình (ưu tiên cache, fallback fetch)
+  let ch = interaction.guild.channels.cache.get(data.channelId);
+  if (!ch) {
+    try { ch = await interaction.guild.channels.fetch(data.channelId).catch(() => null); } catch {}
   }
-  if (!channel) {
-    return interaction.editReply('❌ Không tìm thấy kênh chào mừng (có thể đã bị xoá). Hãy chạy lại `/setwelcome`.');
+  if (!ch || !ch.isTextBased?.()) {
+    return interaction.reply({ content: '⚠️ Kênh chào mừng không hợp lệ hoặc bot không gửi được.', ephemeral: true });
   }
 
-  const me = interaction.client.user;
-  const perms = channel.permissionsFor(me);
-  const canView  = perms?.has('ViewChannel');
-  const canSend  = perms?.has('SendMessages');
-  const canEmbed = perms?.has('EmbedLinks'); // nếu sau này bạn dùng embed
+  // Tạo payload demo & gửi
+  const payload = buildWelcomePayload(
+    interaction.member ?? await interaction.guild.members.fetch(interaction.user.id),
+    data,
+    { demo: true }
+  );
+  await ch.send(payload);
 
-  if (!canView || !canSend) {
-    return interaction.editReply(
-      `❌ Bot thiếu quyền ở <#${channel.id}>:\n` +
-      `• ViewChannel: ${canView ? '✅' : '❌'}\n` +
-      `• SendMessages: ${canSend ? '✅' : '❌'}\n` +
-      `• EmbedLinks: ${canEmbed ? '✅' : '⚠️ (không bắt buộc)'}`
-    );
-  }
-
-  // 3) Render demo message (thay placeholder cơ bản)
-  const guild = interaction.guild;
-  const content = (cfg.message || 'Chào mừng {user} đến với {server}!').toString();
-  const approxCount = guild?.memberCount ?? '…';
-
-  const preview = content
-    .replace(/\{user\}/gi, interaction.user.toString())
-    .replace(/\{username\}/gi, interaction.user.username)
-    .replace(/\{server\}/gi, guild?.name || 'server')
-    .replace(/\{count\}/gi, String(approxCount));
-
-  // 4) Gửi vào kênh
-  try {
-    await channel.send({ content: `*(Demo chào mừng)*\n${preview}` });
-    await interaction.editReply(`✅ Đã gửi **thử** chào mừng vào <#${channel.id}>.`);
-  } catch (e) {
-    console.error('testwelcome send error:', e);
-    await interaction.editReply('❌ Lỗi khi gửi thử chào mừng. Xem logs để biết chi tiết.');
-  }
+  return interaction.reply({ content: '✅ Đã gửi thử chào mừng (demo).', ephemeral: true });
 }
 
     // roll / 8ball / avatar / purge / meme / profile

@@ -3349,10 +3349,7 @@ if (videos.length) {
               .setURL(bestVideo.url)
           );
           await msg.channel.send({ components: [row] });
-        } else {
-          // URL > 512 => gửi tin nhắn thường kèm link
-          await msg.channel.send({ content: `${label}\n${bestVideo.url}` });
-        }
+        } 
       }
     } catch (e2) {
       console.error('fbauto video send error:', e2);

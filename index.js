@@ -3185,6 +3185,47 @@ function trimField(s = '', max = 1024) {
 function safeFilename(name = 'file') {
   return name.replace(/[^\w.\-]+/g, '_');
 }
+
+// ===== Upload limit (MB) cho video FB auto =====
+const FB_UPLOAD_LIMIT_MB = Number(process.env.FB_UPLOAD_LIMIT_MB || 8);
+const FB_UPLOAD_LIMIT_BYTES = FB_UPLOAD_LIMIT_MB * 1024 * 1024;
+
+// Đo size từ Content-Length (HEAD), có fallback GET-stream nếu server chặn HEAD
+async function getRemoteSize(url) {
+  try {
+    const r = await axios.head(url, {
+      maxRedirects: 5,
+      timeout: 10000,
+      validateStatus: () => true,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': '*/*',
+      },
+    });
+    let len = Number(r?.headers?.['content-length'] || 0);
+
+    // nếu bị redirect mà chưa có size
+    if (!len && r?.status >= 300 && r?.status < 400 && r?.headers?.location) {
+      const next = new URL(r.headers.location, url).href;
+      return await getRemoteSize(next);
+    }
+
+    // fallback GET stream nếu HEAD không trả size
+    if (!len) {
+      const r2 = await axios.get(url, {
+        responseType: 'stream',
+        timeout: 10000,
+        validateStatus: () => true,
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' },
+      });
+      len = Number(r2?.headers?.['content-length'] || 0);
+      if (r2?.data?.destroy) r2.data.destroy();
+    }
+    return Number.isFinite(len) ? len : 0;
+  } catch {
+    return 0; // không xác định được size thì trả 0
+  }
+}
 // ============= Auto Facebook settings =============
 const FB_SETTINGS_FILE = path.join(process.cwd(), 'fb-settings.json');
 let fbSettings = { guilds: {} };
@@ -3285,30 +3326,39 @@ client.on('messageCreate', async (msg) => {
 
     // ----- GỬI VIDEO: chọn video "tốt nhất" theo util pickBestMedia -----
     const videos = medias.filter(m =>
-      (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
-    );
+  (m.type || '').toLowerCase() === 'video' || /\.(mp4(?:\?|$))/i.test(m.url || '')
+);
 
-    if (videos.length) {
-      const bestVideo = pickBestMedia(videos);
-      if (bestVideo && bestVideo.url) {
-        try {
-          await msg.channel.send({
-            files: [{
-              attachment: bestVideo.url,
-              name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`)
-            }]
-          });
-        } catch (e) {
-          // nếu upload video quá nặng -> log và bỏ qua (không gửi nút, theo yêu cầu)
-          console.error('fbauto video send error:', e?.message || e);
-        }
+if (videos.length) {
+  const bestVideo = pickBestMedia(videos);
+  if (bestVideo?.url) {
+    try {
+      const size = await getRemoteSize(bestVideo.url);
+
+      if (size > 0 && size <= FB_UPLOAD_LIMIT_BYTES) {
+        // ✅ Nhẹ đủ mức cho phép -> upload
+        await msg.channel.send({
+          files: [{
+            attachment: bestVideo.url,
+            name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`),
+          }],
+        });
+      } else {
+        // ❌ Quá nặng (hoặc không đo được size) -> gửi nút mở link
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel(`🎬 Mở video${bestVideo.quality ? ` • ${bestVideo.quality}` : ''}${size ? ` • ${Math.round(size/1024/1024)}MB` : ''}`)
+            .setURL(bestVideo.url)
+        );
+        await msg.channel.send({ components: [row] });
       }
+    } catch (e2) {
+      console.error('fbauto video send error:', e2?.message || e2);
     }
-
-  } catch (e) {
-    console.error('fb auto error:', e);
   }
-});
+}
+  });
 
 // ================= Utils cho Downr (Instagram) =================
 

@@ -1536,98 +1536,114 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       return interaction.reply('🗑️ Đã reset BXH.');
     }
 
-    // help
-   // ================= /help handler (tự động đọc danh sách lệnh) ==============
+// ==== HELP CONFIG: gom nhóm lệnh theo tên (để render đẹp) ====
+const HELP_CATEGORIES = [
+  { key: 'auto',    title: '⚡ Tự động tải',     names: ['fbauto','instaauto','tiktokauto'] },
+  { key: 'dl',      title: '📥 Downloader',     names: ['fb','insta','tiktok','news'] },
+
+  // Music (tuỳ bot bạn đang có lệnh nào – để đủ phổ biến)
+  { key: 'music',   title: '🎵 Music',          names: ['join','play','playsc','skip','stop','pause','resume','queue','volume','npl'] },
+
+  // Welcome/Moderation (ví dụ – bạn có lệnh nào thì liệt kê)
+  { key: 'welcome', title: '👋 Welcome',        names: ['setwelcome','disablewelcome','testwelcome'] },
+  { key: 'mod',     title: '🛡️ Moderation',    names: ['sendnoti','devsync'] },
+
+  // Fun / Games
+  { key: 'fun',     title: '🎲 Vui vẻ',         names: ['roll','8ball','ship','meme','guess','leaderboard','resetwins'] },
+
+  // Info/Tools
+  { key: 'info',    title: '🧰 Tiện ích',       names: ['uptime','serverinfo','profile','botstats','invite','weather','avatar','purge'] },
+];
+
+// icon nhỏ trước từng tên lệnh (tuỳ chọn cho đẹp)
+function iconFor(name='') {
+  const m = {
+    fb:'🅵', insta:'🅸', tiktok:'🆃', news:'📰',
+    fbauto:'⚡', instaauto:'⚡', tiktokauto:'⚡',
+    play:'▶️', playsc:'🎵', join:'🔊', pause:'⏸️', resume:'▶️', skip:'⏭️', stop:'⏹️', queue:'📜', volume:'🔉', npl:'📜',
+    roll:'🎲', '8ball':'🎱', ship:'💘', meme:'🖼️', guess:'🔢', leaderboard:'🏆', resetwins:'♻️',
+    uptime:'⏱️', serverinfo:'🏠', profile:'🪪', botstats:'📊', invite:'🔗', weather:'⛅', avatar:'🖼️', purge:'🧹',
+    setwelcome:'👋', disablewelcome:'🚫', testwelcome:'🧪',
+    sendnoti:'📣', devsync:'🔧',
+  };
+  return m[name] || '•';
+}
+    
+    // ==== /help (động) ====
 if (interaction.commandName === 'help') {
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
   try {
-    // Lấy toàn bộ slash commands bot đã đăng ký (global + guild)
-    const allCmds = await interaction.client.application.commands.fetch();
+    await interaction.deferReply({ ephemeral: true });
 
-    // Luật đoán "category" từ prefix tên lệnh (đỡ phải maintain tay)
-    const CATEGORY_RULES = [
-      { key: 'fb',      label: 'Facebook', emoji: '📘' },
-      { key: 'insta',   label: 'Instagram', emoji: '📷' },
-      { key: 'tiktok',  label: 'TikTok', emoji: '🎵' },
-      { key: 'news',    label: 'Tin tức', emoji: '📰' },
-      { key: 'music',   label: 'Âm nhạc', emoji: '🎶' }, // nếu bạn dùng nhóm play/skip/...
-      { key: 'server',  label: 'Quản trị', emoji: '🛠️' },
-      { key: 'set',     label: 'Cấu hình', emoji: '⚙️' },
-      // fallback cuối cùng
-    ];
-
-    function guessCategory(cmdName = '') {
-      const k = CATEGORY_RULES.find(r => cmdName.startsWith(r.key));
-      if (k) return k;
-      // nhóm sẵn vài lệnh chung
-      if (['help','uptime','botstats','invite'].includes(cmdName)) return { label: 'Hệ thống', emoji: '🤖' };
-      if (['roll','8ball','meme','guess','leaderboard','resetwins','profile','ship','sendnoti','weather','avatar','purge'].includes(cmdName)) {
-        return { label: 'Tiện ích / Vui vẻ', emoji: '✨' };
-      }
-      return { label: 'Khác', emoji: '📦' };
+    // Lấy danh sách lệnh đã đăng ký cho guild này (ưu tiên guild, fallback global)
+    let cmds;
+    try {
+      cmds = await interaction.client.application.commands.fetch({ guildId: interaction.guildId });
+    } catch {
+      cmds = await interaction.client.application.commands.fetch(); // global
     }
 
-    // Gom nhóm theo category
-    const groups = new Map();
-    for (const cmd of allCmds.values()) {
-      const cat = guessCategory(cmd.name);
-      const key = `${cat.emoji} ${cat.label}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push({
-        name: `/${cmd.name}`,
-        desc: cmd.description || '—',
+    // Chuẩn hoá: [{ name, description }]
+    const all = [...cmds.values()]
+      .map(c => ({ name: String(c.name || '').toLowerCase(), description: String(c.description || '') }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Chia theo nhóm đã cấu hình
+    const picked = new Set();
+    const embeds = [];
+
+    for (const cat of HELP_CATEGORIES) {
+      const items = all.filter(c => cat.names.includes(c.name));
+      if (!items.length) continue;
+
+      picked.add(...items.map(i => i.name));
+
+      // Render danh sách dạng gọn: /name — mô tả (mỗi dòng một lệnh)
+      const lines = items.map(i => {
+        const icon = iconFor(i.name);
+        // Mô tả ngắn gọn (khỏi quá dài)
+        const desc = i.description.length > 80 ? (i.description.slice(0, 77) + '…') : i.description;
+        return `${icon} \`/${i.name}\` — ${desc || '(Không mô tả)'}`;
       });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00AEEF)
+        .setTitle(cat.title)
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: 'Dùng /<lệnh> để gọi • Tự động cập nhật từ danh sách slash commands' })
+        .setTimestamp();
+
+      embeds.push(embed);
     }
 
-    // Bạn có thể override mô tả hiển thị cho vài lệnh quan trọng (thêm usage)
-    const OVERRIDES = {
-      fb:        'Tải bài Facebook (ảnh/video). Dùng: `/fb url:<link>`',
-      fbauto:    'Bật/tắt auto tải FB. Dùng: `/fbauto mode:<off|server|channel>`',
-      insta:     'Tải bài Instagram. Dùng: `/insta url:<link>`',
-      instaauto: 'Bật/tắt auto IG. Dùng: `/instaauto mode:<off|server|channel>`',
-      tiktok:    'Tải video TikTok. Dùng: `/tiktok url:<link>`',
-      tiktokauto:'Bật/tắt auto TikTok. Dùng: `/tiktokauto mode:<off|server|channel>`',
-      news:      'Tin tức theo từ khóa/nguồn. Dùng: `/news q:<từ khóa>`',
-      musicplay: 'Phát nhạc YouTube: `/play <từ khóa|URL>` (và các lệnh queue/skip/stop/...)',
-    };
+    // Mục "Khác": mọi lệnh hợp lệ nhưng không nằm trong category map
+    const other = all.filter(c => !HELP_CATEGORIES.some(cat => cat.names.includes(c.name)));
+    if (other.length) {
+      const lines = other.map(i => {
+        const icon = iconFor(i.name);
+        const desc = i.description.length > 80 ? (i.description.slice(0, 77) + '…') : i.description;
+        return `${icon} \`/${i.name}\` — ${desc || '(Không mô tả)'}`;
+      });
 
-    for (const arr of groups.values()) {
-      for (const item of arr) {
-        const k = item.name.slice(1);
-        if (OVERRIDES[k]) item.desc = OVERRIDES[k];
-      }
-      // sắp xếp cho gọn
-      arr.sort((a, b) => a.name.localeCompare(b.name));
+      const embedOther = new EmbedBuilder()
+        .setColor(0x00AEEF)
+        .setTitle('🧩 Khác')
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: 'Các lệnh chưa phân nhóm' })
+        .setTimestamp();
+
+      embeds.push(embedOther);
     }
 
-    // Render embed gọn gàng (tối đa ~6–7 field để tránh dài quá)
-    const embed = new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('📖 Danh sách lệnh')
-      .setDescription('Các lệnh chính của bot (tự động cập nhật). Dùng `/help` để xem lại.')
-      .setFooter({ text: `Server: ${interaction.guild?.name || '—'}` })
-      .setTimestamp(new Date());
+    // Nếu quá nhiều, Discord mỗi embed giới hạn 6000 ký tự — nhưng với format gọn này thường ổn
+    await interaction.editReply({ embeds, ephemeral: true });
 
-    for (const [cat, items] of groups) {
-      const value = items
-        .map(i => `**${i.name}** — ${i.desc}`)
-        .join('\n');
-      // Discord giới hạn 1024 ký tự / field
-      embed.addFields({ name: cat, value: value.slice(0, 1024) || '—' });
-    }
-
-    // Gợi ý nhanh các lệnh auto đang có
-    const quick = [
-      '`/fbauto mode:<off|server|channel>`',
-      '`/instaauto mode:<off|server|channel>`',
-      '`/tiktokauto mode:<off|server|channel>`',
-    ].join(' • ');
-    embed.addFields({ name: '⚡ Tự động tải', value: quick });
-
-    await interaction.editReply({ embeds: [embed], ephemeral: true });
   } catch (e) {
     console.error('help error:', e);
-    await interaction.editReply({ content: '⚠️ Lỗi khi lấy danh sách lệnh.' });
+    const fallback = new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle('❌ Không thể tải danh sách lệnh')
+      .setDescription('Hãy thử lại sau vài giây.');
+    await interaction.editReply({ embeds: [fallback], ephemeral: true }).catch(() => {});
   }
 }
 

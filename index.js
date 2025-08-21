@@ -839,44 +839,41 @@ rowDisabled(roundId){
 const sendnotiTemp = new Map();
 
 client.on(Events.InteractionCreate, async (interaction) => {
- // ----- Buttons handler (Tài Xỉu) -----
+ // ----- Buttons handler (gọn, cân bằng ngoặc) -----
 if (interaction.isButton()) {
   try {
     const id = String(interaction.customId || '');
-    // Chỉ xử lý các nút của Tài Xỉu
+    // Chỉ xử lý nút của Tài Xỉu
     if (!id.startsWith('tx_')) return;
 
-    // id có dạng:
+    // id dạng:
     //  tx_bet_tai_<roundId> | tx_bet_xiu_<roundId> | tx_dealer_<roundId>
-    const parts   = id.split('_');         // ["tx","bet","tai","<roundId>"] | ["tx","dealer","<roundId>"]
-    const action  = parts[1];              // "bet" | "dealer"
+    const parts   = id.split('_');            // ["tx","bet","tai","<rid>"] | ["tx","dealer","<rid>"]
+    const action  = parts[1];                 // "bet" | "dealer"
     const side    = action === 'bet' ? parts[2] : null;   // "tai" | "xiu" | null
     const roundId = action === 'bet' ? parts[3] : parts[2];
 
     const s = taiXiuState.get(interaction.guild.id);
     if (!s || String(s.roundId) !== String(roundId)) {
-      return interaction.reply({
-        content: '⚠️ Phiên đã kết thúc hoặc không tồn tại.',
-        ephemeral: true
-      });
+      await interaction.reply({ content: '⚠️ Phiên đã kết thúc hoặc không tồn tại.', ephemeral: true });
+      return;
     }
     if (s.locked) {
-      return interaction.reply({
-        content: '⛔ Đã khoá đặt cược (5 giây cuối). Vui lòng đợi kết quả!',
-        ephemeral: true
-      });
+      await interaction.reply({ content: '⛔ Đã khoá đặt cược (5 giây cuối). Vui lòng đợi kết quả!', ephemeral: true });
+      return;
     }
 
-    // Người làm cái
+    // Làm cái
     if (action === 'dealer') {
       s.dealerId = interaction.user.id;
-      return interaction.update({
+      await interaction.update({
         embeds: [TX.render(interaction.guild.id)],
-        components: [TX.row(s.roundId)]
+        components: [TX.row(s.roundId)],
       });
+      return;
     }
 
-    // Đặt cược -> mở modal nhập số coin
+    // Đặt cược -> mở modal nhập coin
     if (action === 'bet') {
       const modal = new ModalBuilder()
         .setCustomId(`tx_modal_${side}_${roundId}`)
@@ -891,13 +888,10 @@ if (interaction.isButton()) {
               .setRequired(true)
           )
         );
-
-      return interaction.showModal(modal);
+      await interaction.showModal(modal);
+      return;
     }
-  } catch (e) {
-    console.error('Button handler error:', e);
-  }
-}
+ 
       if (interaction.customId === 'meme_refresh') {
         await interaction.deferUpdate();
         try {

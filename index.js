@@ -156,6 +156,41 @@ client.on('guildMemberAdd', async (member) => {
 
 const COIN_FILE = path.join(process.cwd(), 'coins.json');
 let coins = {};
+// ===== RPSLS state + badges =====
+const RPS_FILE   = path.join(process.cwd(), 'rpsls.json');   // optional backup
+const BADGE_FILE = path.join(process.cwd(), 'badges.json');
+
+let rpslsState = new Map();   // guildId -> tournament state
+let badges     = {};          // { uid: [badgeName,..] }
+
+async function loadBadges(){
+  try { badges = JSON.parse(await fs.readFile(BADGE_FILE,'utf8')); } catch { badges = {}; }
+}
+async function saveBadges(){
+  try { await fs.writeFile(BADGE_FILE, JSON.stringify(badges,null,2),'utf8'); } catch {}
+}
+function addBadge(uid, name){
+  if (!badges[uid]) badges[uid] = [];
+  if (!badges[uid].includes(name)) badges[uid].push(name);
+  saveBadges().catch(()=>{});
+}
+
+// ==== RPSLS core helpers ====
+const RPS = {
+  moves: ['rock','paper','scissors','lizard','spock'],
+  emoji(m){ return ({ rock:'🪨', paper:'📄', scissors:'✂️', lizard:'🦎', spock:'🖖' })[m] || '❓'; },
+  win(a,b){
+    const W = {
+      rock:['scissors','lizard'],
+      paper:['rock','spock'],
+      scissors:['paper','lizard'],
+      lizard:['spock','paper'],
+      spock:['scissors','rock']
+    };
+    if (a===b) return 0;
+    return W[a].includes(b) ? 1 : -1;
+  }
+};
 
 // === TikTok auto settings (JSON) ===
 const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
@@ -770,6 +805,22 @@ new SlashCommandBuilder()
      .setMinValue(1)
      .setMaxValue(5)
   ),
+
+  new SlashCommandBuilder()
+  .setName('rpsls')
+  .setDescription('Giải đấu Kéo–Búa–Bao–Thằn lằn–Spock')
+  .addSubcommand(s=>s
+    .setName('start')
+    .setDescription('Mở đăng ký giải đấu')
+    .addIntegerOption(o=>o.setName('slots').setDescription('Số người (4/8/16)').addChoices(
+      { name:'4', value:4 }, { name:'8', value:8 }, { name:'16', value:16 }
+    ).setRequired(true))
+    .addIntegerOption(o=>o.setName('entryfee').setDescription('Phí tham gia (coin)'))
+    .addIntegerOption(o=>o.setName('reward').setDescription('Giải thưởng thêm (coin)'))
+  )
+  .addSubcommand(s=>s.setName('join').setDescription('Tham gia giải đang mở đăng ký'))
+  .addSubcommand(s=>s.setName('status').setDescription('Xem tình trạng giải'))
+  .addSubcommand(s=>s.setName('cancel').setDescription('Huỷ giải (chỉ admin)')),
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -790,6 +841,7 @@ client.once(Events.ClientReady, async () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
   await loadAll();
   await registerCommandsForGuilds();
+  await loadBadges().catch(()=>{});
 });
 
 
@@ -835,6 +887,26 @@ rowDisabled(roundId){
   );
 },
   }
+function rpsButtons(tid, round){
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_rock`).setLabel('Đá').setEmoji('🪨').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_paper`).setLabel('Bao').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_scissors`).setLabel('Kéo').setEmoji('✂️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_lizard`).setLabel('Thằn lằn').setEmoji('🦎').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_spock`).setLabel('Spock').setEmoji('🖖').setStyle(ButtonStyle.Secondary),
+  );
+  return [row];
+}
+function lobbyButtons(tid){
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rps_join_${tid}`).setLabel('Tham gia').setEmoji('🙋').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rps_leave_${tid}`).setLabel('Rút').setEmoji('🏃').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rps_start_${tid}`).setLabel('Bắt đầu').setEmoji('🚀').setStyle(ButtonStyle.Primary),
+    )
+  ];
+}
+
 // ------------------- buttons / select menus -------------------
 const sendnotiTemp = new Map();
 
@@ -1009,6 +1081,56 @@ if (interaction.isButton()) {
         return;
       }
 
+// ===== Buttons RPSLS =====
+if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
+  const id  = interaction.customId;       // rps_join_<tid> | rps_leave_<tid> | rps_start_<tid> | rps_play_<tid>_<round>_<move>
+  const gid = interaction.guild.id;
+  const st  = rpslsState.get(gid);
+  if (!st) return interaction.reply({ content:'⚠️ Không có giải.', ephemeral:true });
+
+  if (id.startsWith('rps_join_')) {
+    if (st.started) return interaction.reply({ content:'Đã bắt đầu.', ephemeral:true });
+    if (st.players.includes(interaction.user.id)) return interaction.reply({ content:'Bạn đã tham gia.', ephemeral:true });
+    if (st.players.length >= st.slots) return interaction.reply({ content:'📦 Đủ slot.', ephemeral:true });
+    if (st.fee>0 && typeof getBal==='function'){
+      if (getBal(interaction.user.id) < st.fee) return interaction.reply({ content:'💸 Không đủ coin.', ephemeral:true });
+      addBal(interaction.user.id, -st.fee);
+    }
+    st.players.push(interaction.user.id);
+    await updateLobby(interaction, st);
+    return interaction.reply({ content:'✅ Đã tham gia!', ephemeral:true });
+  }
+
+  if (id.startsWith('rps_leave_')) {
+    if (st.started) return interaction.reply({ content:'Đã bắt đầu.', ephemeral:true });
+    const i = st.players.indexOf(interaction.user.id);
+    if (i>=0) st.players.splice(i,1);
+    await updateLobby(interaction, st);
+    return interaction.reply({ content:'🚪 Đã rút.', ephemeral:true });
+  }
+
+  if (id.startsWith('rps_start_')) {
+    if (interaction.user.id !== st.host && !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
+      return interaction.reply({ content:'❌ Chỉ host/admin.', ephemeral:true });
+    if (st.players.length < 2) return interaction.reply({ content:'Cần ít nhất 2 người.', ephemeral:true });
+    await interaction.reply({ content:'🚀 Bắt đầu!', ephemeral:true });
+    return startTournament(interaction.client, st);
+  }
+
+  if (id.startsWith('rps_play_')) {
+    const parts = id.split('_'); // ['rps','play',tid,round,move]
+    const round = Number(parts[3]||0);
+    const move  = String(parts[4]||'');
+    if (!st.started || st.round !== round) return interaction.reply({ content:'⏳ Round đã đổi.', ephemeral:true });
+    const pair = st.currentPair;
+    if (!pair || ![pair.a, pair.b].includes(interaction.user.id))
+      return interaction.reply({ content:'Chưa tới lượt bạn.', ephemeral:true });
+    if (!RPS.moves.includes(move)) return interaction.reply({ content:'Nước đi không hợp lệ.', ephemeral:true });
+    st.moves.set(`${round}-${interaction.user.id}`, move);
+    return interaction.reply({ content:`Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral:true });
+  }
+}
+    
       // ship reroll
       if (interaction.customId.startsWith('ship_reroll|')) {
         await interaction.deferUpdate();
@@ -1423,7 +1545,129 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
         return interaction.reply({ content:`🛑 Đã hủy phiên #${s.roundId}.`, ephemeral:true });
       }
     }
+if (interaction.commandName === 'rpsls') {
+  const sub = interaction.options.getSubcommand();
+  const gid = interaction.guild.id;
+  if (!rpslsState.has(gid)) rpslsState.set(gid, null);
 
+  const get = (uid)=> (typeof getBal==='function' ? getBal(uid) : 0);
+  const add = (uid,amt)=> (typeof addBal==='function' ? addBal(uid,amt) : 0);
+
+  if (sub === 'start') {
+    if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
+      return interaction.reply({ content:'❌ Chỉ admin mới mở giải.', ephemeral:true });
+    const slots  = interaction.options.getInteger('slots', true);
+    const fee    = interaction.options.getInteger('entryfee') ?? 0;
+    const reward = interaction.options.getInteger('reward')  ?? 0;
+
+    const tid = Date.now().toString(36);
+    const state = {
+      tid, guildId: gid, host: interaction.user.id, channelId: interaction.channel.id,
+      slots, fee, reward,
+      players: [], started:false, round:0,
+      bracket: [], moves:new Map(), msgLobbyId:null, currentPair:null
+    };
+    rpslsState.set(gid, state);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x7c5cff)
+      .setTitle('🎮 RPSLS Tournament – Đăng ký')
+      .setDescription(`Slots: **${slots}** • Phí: **${fee.toLocaleString('vi-VN')}** • Thưởng: **${reward.toLocaleString('vi-VN')}**\nNhấn **Tham gia** để vào giải.`)
+      .addFields({ name:'Người chơi', value:'(chưa có)' })
+      .setFooter({ text:`TID: ${tid}` });
+
+    const msg = await interaction.reply({ embeds:[embed], components: lobbyButtons(tid) });
+    state.msgLobbyId = msg.id;
+    return;
+  }
+
+  if (sub === 'join') {
+    const st = rpslsState.get(gid);
+    if (!st || st.started) return interaction.reply({ content:'⚠️ Chưa có giải đang mở.', ephemeral:true });
+    if (st.players.includes(interaction.user.id)) return interaction.reply({ content:'Bạn đã tham gia.', ephemeral:true });
+    if (st.players.length >= st.slots) return interaction.reply({ content:'📦 Đã đủ slot.', ephemeral:true });
+    if (st.fee>0 && get(interaction.user.id)<st.fee) return interaction.reply({ content:'💸 Không đủ coin.', ephemeral:true });
+    if (st.fee>0) add(interaction.user.id, -st.fee);
+    st.players.push(interaction.user.id);
+    await updateLobby(interaction, st);
+    return interaction.reply({ content:'✅ Đã tham gia!', ephemeral:true });
+  }
+
+  if (sub === 'status') {
+    const st = rpslsState.get(gid);
+    if (!st) return interaction.reply({ content:'Không có giải.', ephemeral:true });
+    const txt = st.started
+      ? `Round **${st.round}** • Cặp: ${st.currentPair ? `<@${st.currentPair.a}> vs <@${st.currentPair.b}>` : '—'}`
+      : `Đang đăng ký: **${st.players.length}/${st.slots}**`;
+    return interaction.reply({ content: txt, ephemeral:true });
+  }
+
+  if (sub === 'cancel') {
+    if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
+      return interaction.reply({ content:'❌ Chỉ admin.', ephemeral:true });
+    rpslsState.set(gid, null);
+    return interaction.reply({ content:'🧹 Đã huỷ giải.', ephemeral:true });
+  }
+}
+
+// helpers cho RPSLS flow
+async function updateLobby(interaction, st){
+  const names = st.players.map(u=>`• <@${u}>`).join('\n') || '(chưa có)';
+  const embed = new EmbedBuilder()
+    .setColor(0x7c5cff)
+    .setTitle('🎮 RPSLS Tournament – Đăng ký')
+    .setDescription(`Slots: **${st.slots}** • Phí: **${st.fee.toLocaleString('vi-VN')}** • Thưởng: **${st.reward.toLocaleString('vi-VN')}**`)
+    .addFields({ name:'Người chơi', value:names })
+    .setFooter({ text:`TID: ${st.tid}` });
+  try{
+    const ch  = await interaction.client.channels.fetch(st.channelId);
+    const msg = await ch.messages.fetch(st.msgLobbyId);
+    await msg.edit({ embeds:[embed], components: lobbyButtons(st.tid) });
+  }catch{}
+}
+
+async function startTournament(client, st){
+  st.started = true; st.round = 1;
+  const arr = [...st.players];
+  for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+  st.bracket = []; for(let i=0;i<arr.length;i+=2) st.bracket.push([arr[i],arr[i+1]]);
+  const ch = await client.channels.fetch(st.channelId);
+  await ch.send({ content:`🚀 **Bắt đầu giải!** ${st.bracket.length} cặp trong Round 1.` });
+  playNextPair(client, st).catch(()=>{});
+}
+async function playNextPair(client, st){
+  if (!st.bracket.length){
+    if (st.players.length>1){
+      st.round++; const a=[...st.players]; st.players=[]; st.bracket=[];
+      for(let i=0;i<a.length;i+=2) st.bracket.push([a[i],a[i+1]]);
+      const ch = await client.channels.fetch(st.channelId);
+      await ch.send({ content:`📣 **Round ${st.round}** bắt đầu!` });
+      return playNextPair(client, st);
+    }
+    const champion = st.players[0];
+    const ch = await client.channels.fetch(st.channelId);
+    await ch.send({ content:`👑 **Vô địch:** <@${champion}>!` });
+    if (st.reward && typeof addBal==='function') try{ addBal(champion, st.reward); }catch{}
+    addBadge(champion,'RPSLS Champion');
+    rpslsState.set(st.guildId, null);
+    return;
+  }
+  const [a,b] = st.bracket.shift(); st.currentPair = { a,b };
+  const ch = await client.channels.fetch(st.channelId);
+  await ch.send({ content:`⚔️ **Round ${st.round}**: <@${a}> vs <@${b}> – chọn trong **30s**!`, components: rpsButtons(st.tid, st.round) });
+  for(const uid of [a,b]) st.moves.delete(`${st.round}-${uid}`);
+  setTimeout(async ()=>{
+    const ma = st.moves.get(`${st.round}-${a}`) || RPS.moves[Math.floor(Math.random()*5)];
+    const mb = st.moves.get(`${st.round}-${b}`) || RPS.moves[Math.floor(Math.random()*5)];
+    const res = RPS.win(ma, mb);
+    const line = `🧠 <@${a}> ${RPS.emoji(ma)} vs ${RPS.emoji(mb)} <@${b}>`;
+    const ch = await client.channels.fetch(st.channelId);
+    if (res===0){ await ch.send({ content:`${line}\n🔁 Hoà! Đấu lại.` }); st.bracket.unshift([a,b]); }
+    else { const win = res===1?a:b; const lose=res===1?b:a; await ch.send({ content:`${line}\n✅ Thắng: <@${win}> • ❌ Thua: <@${lose}>` }); st.players.push(win); }
+    st.currentPair=null; playNextPair(client, st).catch(()=>{});
+  }, 30_000);
+}
+    
     // uptime
     if (interaction.commandName === 'uptime') {
       const ws = client.ws.ping, up = formatUptime(client.uptime ?? 0);
@@ -1603,6 +1847,8 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
           { name:'🚀 Boost server từ', value:boostText, inline:true }
         ).setColor(color)
         .setFooter({ text:`Yêu cầu bởi ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() }).setTimestamp();
+      const b = badges[targetUser.id] || [];
+      if (b.length) embed.addFields({ name:'🏅 Huy hiệu', value: b.map(x=>'• '+x).join('\n') });
       if (bannerURL) embed.setImage(bannerURL);
       const buttons = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('🔗 Mở Avatar').setStyle(ButtonStyle.Link).setURL(avatarURL));
       if (bannerURL) buttons.addComponents(new ButtonBuilder().setLabel('🔗 Mở Banner').setStyle(ButtonStyle.Link).setURL(bannerURL));

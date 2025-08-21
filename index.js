@@ -2177,8 +2177,16 @@ await interaction.editReply({
   embeds: [embed],
   components: rows,
 });
+  } catch (e) {
+    console.error('insta handler error:', e);
+    const msg = '⚠️ Có lỗi khi xử lý link Instagram.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(msg);
+    } else {
+      await interaction.reply({ content: msg, ephemeral: true });
+    }
   }
-}
+} 
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();

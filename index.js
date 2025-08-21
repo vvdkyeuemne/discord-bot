@@ -2146,51 +2146,39 @@ if (interaction.commandName === 'insta') {
       embed.setImage(meta.thumbnail);
     }
 
-    // --- LỌC ẢNH, gửi tối đa 20 tấm ---
-    const images = (medias || [])
-      .filter(m =>
-        (m.type === 'image') ||
-        /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
-      )
-      .slice(0, 20);
+    // === Tạo tối đa 20 nút "Mở media", mỗi row 5 nút ===
+const MAX_BTNS = 20;
+const btnMedias = medias.slice(0, MAX_BTNS);
 
-    // nếu không có ảnh: fallback dùng thumbnail (nếu có)
-    if (!images.length && meta?.thumbnail && /^https?:\/\/\S+/.test(meta.thumbnail)) {
-      images.push({ url: meta.thumbnail, type: 'image' });
-    }
+const rows = [];
+for (let i = 0; i < btnMedias.length; i += 5) {
+  const chunk = btnMedias.slice(i, i + 5);
 
-    if (!images.length) {
-      return interaction.editReply('⚠️ Bài này không có ảnh để gửi (chỉ có video/REEL).');
-    }
+  const row = new ActionRowBuilder().addComponents(
+    ...chunk.map((m, idx) => {
+      const isVideo = /video/i.test(m.type || '') || /\.mp4(?:\?|$)/i.test(m.url || '');
+      const icon = isVideo ? '🎬' : '🖼️';
+      const label =
+        `${icon} Mở media ${i + idx + 1}` +
+        (m.quality ? ` • ${m.quality}` : '');
 
-    // chuẩn bị file đính kèm
-    const attachments = images.map((m, i) => ({
-      attachment: m.url,
-      name: `instagram_${String(i + 1).padStart(2, '0')}${
-        /\.(jpe?g|png|webp)(?:\?|$)/i.test(m.url || '') ? '' : '.jpg'
-      }`,
-    }));
+      return new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel(label)
+        .setURL(m.url);
+    })
+  );
 
-    // Discord giới hạn 10 file / message => tách 2 đợt
-    const firstBatch  = attachments.slice(0, 10);
-    const secondBatch = attachments.slice(10);
+  rows.push(row);
+}
 
-    await interaction.editReply({ embeds: [embed], files: firstBatch });
-
-    if (secondBatch.length) {
-      await interaction.followUp({ files: secondBatch });
-    }
-
-  } catch (e) {
-    console.error('insta handler error:', e);
-    const msg = '⚠️ Có lỗi khi xử lý link Instagram.';
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(msg);
-    } else {
-      await interaction.reply({ content: msg, ephemeral: true });
-    }
+// Gửi embed + nhiều row nút
+await interaction.editReply({
+  embeds: [embed],
+  components: rows,
+});
   }
-} // <--- nhớ đóng block của /insta
+}
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();

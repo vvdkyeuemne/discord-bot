@@ -1399,28 +1399,90 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
       return interaction.reply({ embeds:[embed], components: buttons.components.length?[buttons]:[] });
     }
 
-    // welcome configs (demo)
-    if (interaction.commandName === 'setwelcome') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content:'❌ Cần quyền **Administrator**.', ephemeral:true });
-      const ch = interaction.options.getChannel('channel', true);
-      const message = interaction.options.getString('message') ||
-        'Chào mừng {user} đến với **{server}**! Bạn là thành viên thứ **#{count}** 🎉';
-      welcomes[interaction.guildId] = { channelId: ch.id, message };
-      await saveWelcomes();
-      return interaction.reply(`✅ Đã bật chào mừng tại <#${ch.id}>.`);
-    }
+    // ===== /setwelcome =====
+if (interaction.commandName === 'setwelcome') {
+  // v14: PermissionFlagsBits.Administrator
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: '❌ Cần quyền **Administrator**.', ephemeral: true });
+  }
+
+  const ch = interaction.options.getChannel('channel', true);
+  const message =
+    interaction.options.getString('message') ||
+    'Chào mừng {user} đến với **{server}**! Bạn là thành viên thứ **{count}** 🎉';
+
+  welcomes[interaction.guildId] = { channelId: ch.id, message };
+  await saveWelcomes();
+
+  return interaction.reply({ content: `✅ Đã bật chào mừng tại <#${ch.id}>.`, ephemeral: true });
+}
     if (interaction.commandName === 'disablewelcome') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
         return interaction.reply({ content:'❌ Cần quyền **Administrator**.', ephemeral:true });
       delete welcomes[interaction.guildId]; await saveWelcomes();
       return interaction.reply('🛑 Đã tắt thông báo chào mừng.');
     }
-    if (interaction.commandName === 'testwelcome') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content:'❌ Cần quyền **Administrator**.', ephemeral:true });
-      return interaction.reply({ content:'✅ Đã gửi thử chào mừng (demo).', ephemeral:true });
-    }
+    // ===== /testwelcome =====
+if (interaction.commandName === 'testwelcome') {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: '❌ Cần quyền **Administrator**.', ephemeral: true });
+  }
+
+  // 1) Lấy config
+  const cfg = welcomes?.[interaction.guildId];
+  if (!cfg?.channelId) {
+    return interaction.reply({
+      content: '⚠️ Chưa cấu hình kênh chào mừng. Dùng `/setwelcome` trước nhé.',
+      ephemeral: true
+    });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // 2) Lấy kênh & check quyền
+  let channel = interaction.client.channels.cache.get(cfg.channelId);
+  if (!channel) {
+    try { channel = await interaction.client.channels.fetch(cfg.channelId); } catch {}
+  }
+  if (!channel) {
+    return interaction.editReply('❌ Không tìm thấy kênh chào mừng (có thể đã bị xoá). Hãy chạy lại `/setwelcome`.');
+  }
+
+  const me = interaction.client.user;
+  const perms = channel.permissionsFor(me);
+  const canView  = perms?.has('ViewChannel');
+  const canSend  = perms?.has('SendMessages');
+  const canEmbed = perms?.has('EmbedLinks'); // nếu sau này bạn dùng embed
+
+  if (!canView || !canSend) {
+    return interaction.editReply(
+      `❌ Bot thiếu quyền ở <#${channel.id}>:\n` +
+      `• ViewChannel: ${canView ? '✅' : '❌'}\n` +
+      `• SendMessages: ${canSend ? '✅' : '❌'}\n` +
+      `• EmbedLinks: ${canEmbed ? '✅' : '⚠️ (không bắt buộc)'}`
+    );
+  }
+
+  // 3) Render demo message (thay placeholder cơ bản)
+  const guild = interaction.guild;
+  const content = (cfg.message || 'Chào mừng {user} đến với {server}!').toString();
+  const approxCount = guild?.memberCount ?? '…';
+
+  const preview = content
+    .replace(/\{user\}/gi, interaction.user.toString())
+    .replace(/\{username\}/gi, interaction.user.username)
+    .replace(/\{server\}/gi, guild?.name || 'server')
+    .replace(/\{count\}/gi, String(approxCount));
+
+  // 4) Gửi vào kênh
+  try {
+    await channel.send({ content: `*(Demo chào mừng)*\n${preview}` });
+    await interaction.editReply(`✅ Đã gửi **thử** chào mừng vào <#${channel.id}>.`);
+  } catch (e) {
+    console.error('testwelcome send error:', e);
+    await interaction.editReply('❌ Lỗi khi gửi thử chào mừng. Xem logs để biết chi tiết.');
+  }
+}
 
     // roll / 8ball / avatar / purge / meme / profile
     if (interaction.commandName === 'roll') {

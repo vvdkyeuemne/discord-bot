@@ -1568,28 +1568,46 @@ function iconFor(name='') {
   };
   return m[name] || '•';
 }
+
+// ==== paging utils ====
+const HELP_PAGE_GROUP_SIZE = 3; // mỗi trang hiển thị 3 nhóm
+const HELP_DESC_MAX = 80;       // cắt mô tả quá dài
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function cutDesc(s='') {
+  const t = String(s || '');
+  return t.length > HELP_DESC_MAX ? t.slice(0, HELP_DESC_MAX) + '…' : t;
+}
     
-    // ==== /help (động) ====
+    // ==== /help (phân trang) ====
 if (interaction.commandName === 'help') {
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    // Lấy danh sách lệnh đã đăng ký cho guild này (ưu tiên guild, fallback global)
+    // Lấy danh sách lệnh đã đăng ký (ưu tiên guild → fallback global)
     let cmds;
     try {
       cmds = await interaction.client.application.commands.fetch({ guildId: interaction.guildId });
     } catch {
-      cmds = await interaction.client.application.commands.fetch(); // global
+      cmds = await interaction.client.application.commands.fetch();
     }
 
-    // Chuẩn hoá: [{ name, description }]
-    const all = [...cmds.values()]
-      .map(c => ({ name: String(c.name || '').toLowerCase(), description: String(c.description || '') }))
+    // Chuẩn hoá
+    let all = [...cmds.values()]
+      .map(c => ({
+        name: String(c.name || '').toLowerCase(),
+        description: String(c.description || ''),
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Chia theo nhóm đã cấu hình
+    // Gom theo nhóm đã cấu hình → chỉ lấy nhóm có ít nhất 1 lệnh tồn tại
+    const sections = [];
     const picked = new Set();
-    const embeds = [];
 
     for (const cat of HELP_CATEGORIES) {
       const items = all.filter(c => cat.names.includes(c.name));
@@ -1597,56 +1615,117 @@ if (interaction.commandName === 'help') {
 
       picked.add(...items.map(i => i.name));
 
-      // Render danh sách dạng gọn: /name — mô tả (mỗi dòng một lệnh)
       const lines = items.map(i => {
         const icon = iconFor(i.name);
-        // Mô tả ngắn gọn (khỏi quá dài)
-        const desc = i.description.length > 80 ? (i.description.slice(0, 77) + '…') : i.description;
-        return `${icon} \`/${i.name}\` — ${desc || '(Không mô tả)'}`;
+        const desc = cutDesc(i.description || 'Không mô tả');
+        return `${icon} \`/${i.name}\` — ${desc}`;
       });
 
+      sections.push({
+        title: cat.title,
+        body: lines.join('\n')
+      });
+    }
+
+    // Mục "Khác" (các lệnh hợp lệ nhưng không có trong map)
+    const others = all.filter(c => !HELP_CATEGORIES.some(cat => cat.names.includes(c.name)));
+    if (others.length) {
+      const lines = others.map(i => `• \`/${i.name}\` — ${cutDesc(i.description || 'Không mô tả')}`);
+      sections.push({ title: '🍀 Khác', body: lines.join('\n') });
+    }
+
+    // Nếu rỗng
+    if (!sections.length) {
+      return interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xE04F5F)
+          .setTitle('❌ Không thấy lệnh nào')
+          .setDescription('Có thể bot chưa đăng ký slash commands cho server này.')
+        ],
+        ephemeral: true
+      });
+    }
+
+    // Chia trang: mỗi trang N nhóm
+    const pages = chunk(sections, HELP_PAGE_GROUP_SIZE).map((groups, idx, arr) => {
       const embed = new EmbedBuilder()
-        .setColor(0x00AEEF)
-        .setTitle(cat.title)
-        .setDescription(lines.join('\n'))
-        .setFooter({ text: 'Dùng /<lệnh> để gọi • Tự động cập nhật từ danh sách slash commands' })
+        .setColor(0x00AAEE)
+        .setTitle(`📖 Danh sách lệnh • Trang ${idx + 1}/${arr.length}`)
+        .setDescription('Dùng **`/<lệnh>`** để gọi. Danh sách này tự động lấy từ slash commands đã đăng ký.')
         .setTimestamp();
 
-      embeds.push(embed);
-    }
+      for (const g of groups) {
+        embed.addFields({ name: g.title, value: g.body });
+      }
+      return embed;
+    });
 
-    // Mục "Khác": mọi lệnh hợp lệ nhưng không nằm trong category map
-    const other = all.filter(c => !HELP_CATEGORIES.some(cat => cat.names.includes(c.name)));
-    if (other.length) {
-      const lines = other.map(i => {
-        const icon = iconFor(i.name);
-        const desc = i.description.length > 80 ? (i.description.slice(0, 77) + '…') : i.description;
-        return `${icon} \`/${i.name}\` — ${desc || '(Không mô tả)'}`;
-      });
+    // Nút điều hướng
+    const makeRow = (page, total) => new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`help_prev`)
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('⬅️')
+        .setDisabled(page === 0),
+      new ButtonBuilder()
+        .setCustomId(`help_close`)
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('❌'),
+      new ButtonBuilder()
+        .setCustomId(`help_next`)
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('➡️')
+        .setDisabled(page >= total - 1),
+    );
 
-      const embedOther = new EmbedBuilder()
-        .setColor(0x00AEEF)
-        .setTitle('🧩 Khác')
-        .setDescription(lines.join('\n'))
-        .setFooter({ text: 'Các lệnh chưa phân nhóm' })
-        .setTimestamp();
+    let page = 0;
+    const reply = await interaction.editReply({
+      embeds: [pages[page]],
+      components: [makeRow(page, pages.length)],
+      ephemeral: true
+    });
 
-      embeds.push(embedOther);
-    }
+    // Collector cho buttons (chỉ tác giả bấm được)
+    const collector = reply.createMessageComponentCollector({
+      time: 60_000, // 60s
+      filter: (i) => i.user.id === interaction.user.id
+    });
 
-    // Nếu quá nhiều, Discord mỗi embed giới hạn 6000 ký tự — nhưng với format gọn này thường ổn
-    await interaction.editReply({ embeds, ephemeral: true });
+    collector.on('collect', async (btn) => {
+      try {
+        if (btn.customId === 'help_close') {
+          collector.stop('closed');
+          return btn.update({ components: [] }); // ẩn nút
+        }
+        if (btn.customId === 'help_prev' && page > 0) page--;
+        if (btn.customId === 'help_next' && page < pages.length - 1) page++;
+
+        await btn.update({
+          embeds: [pages[page]],
+          components: [makeRow(page, pages.length)],
+        });
+      } catch (e) { /* ignore */ }
+    });
+
+    collector.on('end', async () => {
+      try {
+        await interaction.editReply({
+          components: [makeRow(page, pages.length).setComponents(
+            ...makeRow(page, pages.length).components.map(b => ButtonBuilder.from(b).setDisabled(true))
+          )]
+        });
+      } catch {}
+    });
 
   } catch (e) {
-    console.error('help error:', e);
-    const fallback = new EmbedBuilder()
-      .setColor(0xED4245)
-      .setTitle('❌ Không thể tải danh sách lệnh')
-      .setDescription('Hãy thử lại sau vài giây.');
-    await interaction.editReply({ embeds: [fallback], ephemeral: true }).catch(() => {});
+    console.error('help paging error:', e);
+    const fb = new EmbedBuilder()
+      .setColor(0xE04F5F)
+      .setTitle('⚠️ Không thể hiển thị trợ giúp')
+      .setDescription('Đã xảy ra lỗi khi dựng danh sách lệnh.');
+    await interaction.editReply({ embeds: [fb], ephemeral: true }).catch(() => {});
   }
 }
-
     // gemini
     if (interaction.commandName === 'gemini') {
       const prompt = interaction.options.getString('prompt', true);

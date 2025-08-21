@@ -3359,6 +3359,10 @@ if (videos.length) {
     }
   }
 }
+} catch (e) {
+    console.error('fb auto error:', e);
+  }
+});
 // ================= Utils cho Downr (Instagram) =================
 
 /**

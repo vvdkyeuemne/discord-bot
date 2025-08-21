@@ -939,7 +939,9 @@ if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
       });
       return;
     }
-
+          }
+}
+}
     if (action === 'bet') {
       const modal = new ModalBuilder()
         .setCustomId(`tx_modal_${s.side}_${roundId}`)
@@ -957,7 +959,6 @@ if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
       await interaction.showModal(modal);
       return;
     } 
-
     // Đặt cược -> mở modal nhập coin
     if (action === 'bet') {
       const modal = new ModalBuilder()
@@ -976,13 +977,7 @@ if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
       await interaction.showModal(modal);
       return;
     }
- } catch (e) {
-    console.error('TX button error:', e);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Lỗi xử lý nút Tài Xỉu.', ephemeral: true }).catch(() => {});
-    }
-  }
-}
+ 
       if (interaction.customId === 'meme_refresh') {
         await interaction.deferUpdate();
         try {
@@ -1068,14 +1063,6 @@ if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
       return interaction.reply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral: true });
     }
 
-  } catch (e) {
-    console.error('RPSLS button error:', e);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Lỗi xử lý nút RPSLS.', ephemeral: true }).catch(() => {});
-    }
-  }
-  return; // chặn không rơi xuống các handler khác
-}
       // ===== Button: trả lời quiz =====
       if (interaction.customId.startsWith('quiz_ans_')) {
         const parts = interaction.customId.split('_'); // ["quiz","ans","<interactionId>","<idx>"]
@@ -1198,9 +1185,12 @@ if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
         return;
       }
 
-    } catch(e){ console.error('Button handler error:', e); }
-    return;
+    } catch (e) {
+  console.error('Button handler error:', e);
+  if (!interaction.replied && !interaction.deferred) {
+    interaction.reply({ content: '❌ Lỗi xử lý nút bấm.', ephemeral: true }).catch(()=>{});
   }
+              }
 
 // ====== Tai Xiu modal submit ======
   if (interaction.isModalSubmit() && interaction.customId.startsWith('tx_modal_')) {

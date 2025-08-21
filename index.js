@@ -93,6 +93,29 @@ const WELCOME_FILE = path.join(process.cwd(), 'welcome.json');
 
 let wins = {};
 let welcomes = {};
+client.on('guildMemberAdd', async (member) => {
+  try {
+    const data = welcomes[member.guild.id];
+    if (!data) return;                     // chưa cấu hình
+    const guild = member.guild;
+    const count = guild.memberCount;
+
+    // Lấy channel: ưu tiên cache, fallback fetch
+    let ch = guild.channels.cache.get(data.channelId);
+    if (!ch) {
+      try { ch = await guild.channels.fetch(data.channelId).catch(() => null); } catch {}
+    }
+    if (!ch || !ch.isTextBased?.()) return;
+
+    const msg =
+      data.message ||
+      `Chào mừng ${member} đến với **${guild.name}**! Bạn là thành viên thứ **${count}** 🎉`;
+
+    await ch.send(msg);
+  } catch (e) {
+    console.error('❌ Không gửi được welcome:', e);
+  }
+});
 const COIN_FILE = path.join(process.cwd(), 'coins.json');
 let coins = {};
 

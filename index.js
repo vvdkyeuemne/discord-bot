@@ -3354,7 +3354,6 @@ if (videos.length) {
           await msg.channel.send({ content: `${label}\n${bestVideo.url}` });
         }
       }
-   }
   } catch (e) {
     console.error('fb auto error:', e);
   }

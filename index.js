@@ -3255,7 +3255,7 @@ function isFacebookUrl(s = '') {
 // Dùng lại extractFirstUrl(text) nếu bạn đã có cho instaauto.
 // Nếu CHƯA có thì mở comment dưới:
 // function extractFirstUrl(text = '') { const m = text.match(/https?:\/\/\S+/); return m ? m[0] : ''; }
-// ============= Auto FB trong tin nhắn (gửi file) =============
+// ============ Auto FB trong tin nhắn (gửi file) ============
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
@@ -3272,7 +3272,7 @@ client.on('messageCreate', async (msg) => {
     console.log('[fbauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
     await msg.channel.sendTyping();
 
-    // lấy media + meta qua utils Downr hiện có
+    // lấy media + meta qua utils Downr
     const { medias, meta } = await fetchFacebookViaDownr(url);
     if (!Array.isArray(medias) || medias.length === 0) return;
 
@@ -3286,17 +3286,10 @@ client.on('messageCreate', async (msg) => {
 
     if (meta?.thumbnail) embed.setImage(meta.thumbnail);
     if (meta?.caption || meta?.title) {
-      embed.addFields({
-        name: '📖 Caption',
-        value: trimField(meta.caption || meta.title, 1024),
-      });
+      embed.addFields({ name: '📖 Caption', value: trimField(meta.caption || meta.title, 1024) });
     }
     if (meta?.author) {
-      embed.addFields({
-        name: '✍️ Tác giả',
-        value: trimField(meta.author, 256),
-        inline: true,
-      });
+      embed.addFields({ name: '✍️ Tác giả', value: trimField(meta.author, 256), inline: true });
     }
 
     await msg.reply({ embeds: [embed] });
@@ -3310,10 +3303,9 @@ client.on('messageCreate', async (msg) => {
     if (images.length) {
       const atts = images.map((m, i) => ({
         attachment: m.url,
-        name: safeFilename(`facebook_img_${String(i + 1).padStart(2, '0')}.${m.ext || (/\.(\w+)(?:\?|$)/.exec(m.url || '')?.[1] || 'jpg')}`)
+        name: safeFilename(`facebook_img_${String(i + 1).padStart(2, '0')}.${m.ext || 'jpg'}`)
       }));
 
-      // chia lô 10
       for (let i = 0; i < atts.length; i += 10) {
         const batch = atts.slice(i, i + 10);
         try {
@@ -3324,41 +3316,48 @@ client.on('messageCreate', async (msg) => {
       }
     }
 
-    // ----- GỬI VIDEO: chọn video "tốt nhất" theo util pickBestMedia -----
+    // ----- GỬI VIDEO: chọn video “tốt nhất” rồi kiểm tra size -----
     const videos = medias.filter(m =>
-  (m.type || '').toLowerCase() === 'video' || /\.(mp4(?:\?|$))/i.test(m.url || '')
-);
+      (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
+    );
 
-if (videos.length) {
-  const bestVideo = pickBestMedia(videos);
-  if (bestVideo?.url) {
-    try {
-      const size = await getRemoteSize(bestVideo.url);
+    if (videos.length) {
+      const bestVideo = pickBestMedia(videos);
+      if (bestVideo?.url) {
+        try {
+          const size = await getRemoteSize(bestVideo.url);
 
-      if (size > 0 && size <= FB_UPLOAD_LIMIT_BYTES) {
-        // ✅ Nhẹ đủ mức cho phép -> upload
-        await msg.channel.send({
-          files: [{
-            attachment: bestVideo.url,
-            name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`),
-          }],
-        });
-      } else {
-        // ❌ Quá nặng (hoặc không đo được size) -> gửi nút mở link
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setStyle(ButtonStyle.Link)
-            .setLabel(`🎬 Mở video${bestVideo.quality ? ` • ${bestVideo.quality}` : ''}${size ? ` • ${Math.round(size/1024/1024)}MB` : ''}`)
-            .setURL(bestVideo.url)
-        );
-        await msg.channel.send({ components: [row] });
+          if (size > 0 && size <= FB_UPLOAD_LIMIT_BYTES) {
+            // nhỏ hơn ngưỡng => upload trực tiếp
+            await msg.channel.send({
+              files: [{
+                attachment: bestVideo.url,
+                name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`)
+              }]
+            });
+          } else {
+            // quá nặng hoặc không đo được size => gửi nút link
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setLabel(
+                  `🎬 Mở video${bestVideo.quality ? ' • ' + bestVideo.quality : ''}${
+                    size ? ' • ' + Math.round(size / 1024 / 1024) + 'MB' : ''
+                  }`
+                )
+                .setURL(bestVideo.url)
+            );
+            await msg.channel.send({ components: [row] });
+          }
+        } catch (e2) {
+          console.error('fbauto video send error:', e2);
+        }
       }
-    } catch (e2) {
-      console.error('fbauto video send error:', e2?.message || e2);
     }
+  } catch (e) {
+    console.error('fb auto error:', e);
   }
-}
-
+});
 // ================= Utils cho Downr (Instagram) =================
 
 /**

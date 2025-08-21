@@ -1537,35 +1537,99 @@ taiXiuState.delete(interaction.guild.id);}, t*1000);
     }
 
     // help
-    if (interaction.commandName === 'help') {
-      const embed = new EmbedBuilder()
-        .setTitle('📖 Danh sách lệnh')
-        .addFields(
-          { name:'/uptime', value:'Ping, uptime, RAM/CPU.' },
-          { name:'/serverinfo', value:'Thông tin server hiện tại.' },
-          { name:'/setwelcome', value:'Bật chào mừng {user}/{server}/{count}.' },
-          { name:'/disablewelcome', value:'Tắt chào mừng (admin).' },
-          { name:'/testwelcome', value:'Gửi thử chào mừng (admin).' },
-          { name:'/roll [faces]', value:'Xúc xắc n-mặt.' },
-          { name:'/8ball <câu hỏi>', value:'Tiên tri bóng 8.' },
-          { name:'/avatar [user]', value:'Lấy avatar của bạn/người khác.' },
-          { name:'/purge <số tin>', value:'Xóa 2–100 tin (cần quyền).' },
-          { name:'/meme', value:'Meme ngẫu nhiên + 🔁.' },
-          { name:'/profile [user]', value:'Thông tin chi tiết.' },
-          { name:'/guess <số>', value:'Game đoán số 1–100.' },
-          { name:'/leaderboard', value:'BXH đoán số.' },
-          { name:'/resetwins', value:'Reset BXH (admin).' },
-          { name:'/gemini <prompt>', value:'Hỏi Gemini.' },
-          { name:'/weather <location>', value:'Thời tiết 1/3/7 ngày.' },
-          { name:'/ship', value:'Ghép đôi + ảnh + 🔁.' },
-          { name:'/sendnoti', value:'Gửi thông báo có preview.' },
-          { name:'/invite', value:'Lấy link mời bot.' },
-          { name:'/join|/play|/skip|/stop|/pause|/resume|/np|/queue|/volume', value:'Phát nhạc YouTube.' },
-          { name:'/playsc', value:'Phát nhạc SoundCloud (tìm kiếm & chọn bài).' },
-          { name:'/botstats', value:'Thông số bot & hệ thống.' },
-        ).setColor(0x3498db);
-      return interaction.reply({ embeds:[embed] });
+   // ================= /help handler (tự động đọc danh sách lệnh) ==============
+if (interaction.commandName === 'help') {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  try {
+    // Lấy toàn bộ slash commands bot đã đăng ký (global + guild)
+    const allCmds = await interaction.client.application.commands.fetch();
+
+    // Luật đoán "category" từ prefix tên lệnh (đỡ phải maintain tay)
+    const CATEGORY_RULES = [
+      { key: 'fb',      label: 'Facebook', emoji: '📘' },
+      { key: 'insta',   label: 'Instagram', emoji: '📷' },
+      { key: 'tiktok',  label: 'TikTok', emoji: '🎵' },
+      { key: 'news',    label: 'Tin tức', emoji: '📰' },
+      { key: 'music',   label: 'Âm nhạc', emoji: '🎶' }, // nếu bạn dùng nhóm play/skip/...
+      { key: 'server',  label: 'Quản trị', emoji: '🛠️' },
+      { key: 'set',     label: 'Cấu hình', emoji: '⚙️' },
+      // fallback cuối cùng
+    ];
+
+    function guessCategory(cmdName = '') {
+      const k = CATEGORY_RULES.find(r => cmdName.startsWith(r.key));
+      if (k) return k;
+      // nhóm sẵn vài lệnh chung
+      if (['help','uptime','botstats','invite'].includes(cmdName)) return { label: 'Hệ thống', emoji: '🤖' };
+      if (['roll','8ball','meme','guess','leaderboard','resetwins','profile','ship','sendnoti','weather','avatar','purge'].includes(cmdName)) {
+        return { label: 'Tiện ích / Vui vẻ', emoji: '✨' };
+      }
+      return { label: 'Khác', emoji: '📦' };
     }
+
+    // Gom nhóm theo category
+    const groups = new Map();
+    for (const cmd of allCmds.values()) {
+      const cat = guessCategory(cmd.name);
+      const key = `${cat.emoji} ${cat.label}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({
+        name: `/${cmd.name}`,
+        desc: cmd.description || '—',
+      });
+    }
+
+    // Bạn có thể override mô tả hiển thị cho vài lệnh quan trọng (thêm usage)
+    const OVERRIDES = {
+      fb:        'Tải bài Facebook (ảnh/video). Dùng: `/fb url:<link>`',
+      fbauto:    'Bật/tắt auto tải FB. Dùng: `/fbauto mode:<off|server|channel>`',
+      insta:     'Tải bài Instagram. Dùng: `/insta url:<link>`',
+      instaauto: 'Bật/tắt auto IG. Dùng: `/instaauto mode:<off|server|channel>`',
+      tiktok:    'Tải video TikTok. Dùng: `/tiktok url:<link>`',
+      tiktokauto:'Bật/tắt auto TikTok. Dùng: `/tiktokauto mode:<off|server|channel>`',
+      news:      'Tin tức theo từ khóa/nguồn. Dùng: `/news q:<từ khóa>`',
+      musicplay: 'Phát nhạc YouTube: `/play <từ khóa|URL>` (và các lệnh queue/skip/stop/...)',
+    };
+
+    for (const arr of groups.values()) {
+      for (const item of arr) {
+        const k = item.name.slice(1);
+        if (OVERRIDES[k]) item.desc = OVERRIDES[k];
+      }
+      // sắp xếp cho gọn
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    // Render embed gọn gàng (tối đa ~6–7 field để tránh dài quá)
+    const embed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle('📖 Danh sách lệnh')
+      .setDescription('Các lệnh chính của bot (tự động cập nhật). Dùng `/help` để xem lại.')
+      .setFooter({ text: `Server: ${interaction.guild?.name || '—'}` })
+      .setTimestamp(new Date());
+
+    for (const [cat, items] of groups) {
+      const value = items
+        .map(i => `**${i.name}** — ${i.desc}`)
+        .join('\n');
+      // Discord giới hạn 1024 ký tự / field
+      embed.addFields({ name: cat, value: value.slice(0, 1024) || '—' });
+    }
+
+    // Gợi ý nhanh các lệnh auto đang có
+    const quick = [
+      '`/fbauto mode:<off|server|channel>`',
+      '`/instaauto mode:<off|server|channel>`',
+      '`/tiktokauto mode:<off|server|channel>`',
+    ].join(' • ');
+    embed.addFields({ name: '⚡ Tự động tải', value: quick });
+
+    await interaction.editReply({ embeds: [embed], ephemeral: true });
+  } catch (e) {
+    console.error('help error:', e);
+    await interaction.editReply({ content: '⚠️ Lỗi khi lấy danh sách lệnh.' });
+  }
+}
 
     // gemini
     if (interaction.commandName === 'gemini') {

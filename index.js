@@ -3482,7 +3482,3 @@ function fmtTime(sec) {
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
-function extractFirstUrl(text = '') {
-  const m = text.match(/https?:\/\/\S+/);
-  return m ? m[0] : '';
-}

@@ -113,7 +113,7 @@ function buildWelcomePayload(member, data, { demo = false } = {}) {
     .setColor(0x00D084)
     .setTitle(demo ? '🧪 (Demo) chào mừng' : '🎉 Chào mừng thành viên mới!')
     .setDescription(
-      `Xin chào ${member}!\n` +
+      `Xin chào ${member.user.username}!\n` +
       `Chào mừng bạn đến với **${guild.name}**.\n` +
       `Bạn là thành viên thứ **${countFmt}** ✨`
     )

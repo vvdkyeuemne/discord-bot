@@ -840,38 +840,68 @@ const sendnotiTemp = new Map();
 
 client.on(Events.InteractionCreate, async (interaction) => {
   // Buttons
-  if (interaction.isButton()) {
-    try {
-      // ====== Tai Xiu buttons ======
-      if (interaction.customId.startsWith('tx_')) {
-        const [_, action, side, roundId] = interaction.customId.split('_'); // tx_bet_tai_1234 / tx_bet_xiu_1234 / tx_dealer_1234
-        const s = taiXiuState.get(interaction.guild.id);
-        if (!s || String(s.roundId) !== String(roundId)) {
-          return interaction.reply({ content:'⚠️ Phiên đã kết thúc hoặc không tồn tại.', ephemeral:true });
-        }
-        if (s.locked) {
-          return interaction.reply({ content:'⛔ Đã khóa đặt cược (5 giây cuối). Vui lòng đợi kết quả!', ephemeral:true });
-        }
-        if (action === 'dealer') {
-          s.dealerId = interaction.user.id;
-          return interaction.update({ embeds:[TX.render(interaction.guild.id)], components:[TX.row(s.roundId)] });
-        }
-        if (action === 'bet') {
-          const modal = new ModalBuilder()
-            .setCustomId(`tx_modal_${side}_${roundId}`)
-            .setTitle(`Đặt ${side === 'tai' ? 'TÀI' : 'XỈU'}`)
-            .addComponents(new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId('amount')
-                .setLabel('Nhập số coin muốn cược')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ví dụ: 1000')
-                .setRequired(true)
-            ));
-          return interaction.showModal(modal);
-        }
-      }
+if (interaction.isButton()) {
+  try {
+    // chỉ xử lý các nút của Tài Xỉu
+    if (!interaction.customId.startsWith('tx_')) return;
 
+    // tx_bet_tai_<roundId> | tx_bet_xiu_<roundId> | tx_dealer_<roundId>
+    const [prefix, action, a3, a4] = interaction.customId.split('_');
+    let side = null;
+    let roundId = null;
+
+    if (action === 'bet') {
+      side = a3;        // 'tai' | 'xiu'
+      roundId = a4;     // '<roundId>'
+    } else {
+      roundId = a3;     // '<roundId>'
+    }
+
+    const s = taiXiuState.get(interaction.guild.id);
+    if (!s || String(s.roundId) !== String(roundId)) {
+      return interaction.reply({
+        content: '⚠️ Phiên đã kết thúc hoặc không tồn tại.',
+        ephemeral: true
+      });
+    }
+    if (s.locked) {
+      return interaction.reply({
+        content: '⛔ Đã khoá đặt cược (5 giây cuối). Vui lòng đợi kết quả!',
+        ephemeral: true
+      });
+    }
+
+    // Người làm cái
+    if (action === 'dealer') {
+      s.dealerId = interaction.user.id;
+      return interaction.update({
+        embeds: [TX.render(interaction.guild.id)],
+        components: [TX.row(s.roundId)]
+      });
+    }
+
+    // Đặt cược -> mở modal nhập số coin
+    if (action === 'bet') {
+      const modal = new ModalBuilder()
+        .setCustomId(`tx_modal_${side}_${roundId}`)
+        .setTitle(`${side === 'tai' ? 'TÀI' : 'XỈU'}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('amount')
+              .setLabel('Nhập số coin muốn cược')
+              .setStyle(TextInputStyle.Short)
+              .setPlaceholder('ví dụ: 1000')
+              .setRequired(true)
+          )
+        );
+
+      return interaction.showModal(modal);
+    }
+  } catch (e) {
+    // tránh crash nếu có lỗi lẻ
+  }
+}
       if (interaction.customId === 'meme_refresh') {
         await interaction.deferUpdate();
         try {

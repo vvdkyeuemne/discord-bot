@@ -3226,6 +3226,20 @@ async function getRemoteSize(url) {
     return 0; // không xác định được size thì trả 0
   }
 }
+// Rút gọn URL để nhét vào Button (Discord giới hạn 512 ký tự)
+async function shortenUrl(longUrl = '') {
+  try {
+    const r = await axios.get('https://is.gd/create.php', {
+      params: { format: 'simple', url: longUrl },
+      timeout: 8000,
+      validateStatus: () => true,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const s = String(r?.data || '').trim();
+    if (/^https?:\/\//i.test(s)) return s; // is.gd trả link ngắn dạng https://is.gd/xxxx
+  } catch {}
+  return longUrl; // fallback: trả lại link gốc nếu rút gọn fail
+}
 // ============= Auto Facebook settings =============
 const FB_SETTINGS_FILE = path.join(process.cwd(), 'fb-settings.json');
 let fbSettings = { guilds: {} };
@@ -3336,21 +3350,33 @@ if (videos.length) {
           }]
         });
       } else {
-        // ❌ Nặng hoặc không đo được size
-        const label = `🎬 Mở video${bestVideo.quality ? ' • ' + bestVideo.quality : ''}`
-          + (size ? ` • ${Math.round(size / 1024 / 1024)}MB` : '');
+  // ❌ Nặng hoặc không đo được size -> gửi nút mở link (rút gọn nếu cần)
+  const label =
+    `🎬 Mở video` +
+    (bestVideo.quality ? ` • ${bestVideo.quality}` : '') +
+    (size ? ` • ${Math.round(size / 1024 / 1024)}MB` : '');
 
-        if ((bestVideo.url || '').length <= 512) {
-          // URL <= 512 => gửi nút link
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setStyle(ButtonStyle.Link)
-              .setLabel(label)
-              .setURL(bestVideo.url)
-          );
-          await msg.channel.send({ components: [row] });
-        } 
-      }
+  let openUrl = bestVideo.url || '';
+
+  // Nếu URL dài > 512 thì rút gọn trước
+  if (openUrl.length > 500) {
+    openUrl = await shortenUrl(openUrl);
+  }
+
+  // Bảo hiểm: Discord giới hạn 512 ký tự cho Button URL
+  if (openUrl.length > 512) {
+    // Nếu vẫn dài (dịp hiếm) -> gửi tin nhắn thường
+    await msg.channel.send({ content: `${label}\n${openUrl}` });
+  } else {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel(label)
+        .setURL(openUrl)
+    );
+    await msg.channel.send({ components: [row] });
+  }
+}
     } catch (e2) {
       console.error('fbauto video send error:', e2);
     }

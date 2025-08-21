@@ -3317,43 +3317,44 @@ client.on('messageCreate', async (msg) => {
     }
 
     // ----- GỬI VIDEO: chọn video “tốt nhất” rồi kiểm tra size -----
-    const videos = medias.filter(m =>
-      (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
-    );
+const videos = medias.filter(m =>
+  (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
+);
 
-    if (videos.length) {
-      const bestVideo = pickBestMedia(videos);
-      if (bestVideo?.url) {
-        try {
-          const size = await getRemoteSize(bestVideo.url);
+if (videos.length) {
+  const bestVideo = pickBestMedia(videos);
+  if (bestVideo?.url) {
+    try {
+      const size = await getRemoteSize(bestVideo.url);
 
-          if (size > 0 && size <= FB_UPLOAD_LIMIT_BYTES) {
-            // nhỏ hơn ngưỡng => upload trực tiếp
-            await msg.channel.send({
-              files: [{
-                attachment: bestVideo.url,
-                name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`)
-              }]
-            });
-          } else {
-            // quá nặng hoặc không đo được size => gửi nút link
-            const row = new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setStyle(ButtonStyle.Link)
-                .setLabel(
-                  `🎬 Mở video${bestVideo.quality ? ' • ' + bestVideo.quality : ''}${
-                    size ? ' • ' + Math.round(size / 1024 / 1024) + 'MB' : ''
-                  }`
-                )
-                .setURL(bestVideo.url)
-            );
-            await msg.channel.send({ components: [row] });
-          }
-        } catch (e2) {
-          console.error('fbauto video send error:', e2);
+      if (size > 0 && size <= FB_UPLOAD_LIMIT_BYTES) {
+        // ✅ Nhẹ => upload trực tiếp
+        await msg.channel.send({
+          files: [{
+            attachment: bestVideo.url,
+            name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`)
+          }]
+        });
+      } else {
+        // ❌ Nặng hoặc không đo được size
+        const label = `🎬 Mở video${bestVideo.quality ? ' • ' + bestVideo.quality : ''}`
+          + (size ? ` • ${Math.round(size / 1024 / 1024)}MB` : '');
+
+        if ((bestVideo.url || '').length <= 512) {
+          // URL <= 512 => gửi nút link
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setStyle(ButtonStyle.Link)
+              .setLabel(label)
+              .setURL(bestVideo.url)
+          );
+          await msg.channel.send({ components: [row] });
+        } else {
+          // URL > 512 => gửi tin nhắn thường kèm link
+          await msg.channel.send({ content: `${label}\n${bestVideo.url}` });
         }
       }
-    }
+   }
   } catch (e) {
     console.error('fb auto error:', e);
   }

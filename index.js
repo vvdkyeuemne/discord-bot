@@ -649,6 +649,20 @@ new SlashCommandBuilder()
      .setDescription('Dán link Facebook vào đây')
      .setRequired(true)
   ),
+
+new SlashCommandBuilder()
+  .setName('fbauto')
+  .setDescription('Bật/tắt chế độ tự động xử lý link Facebook trong server/kênh')
+  .addStringOption(o =>
+    o.setName('mode')
+      .setDescription('Chọn chế độ auto')
+      .setRequired(true)
+      .addChoices(
+        { name: 'off (tắt)', value: 'off' },
+        { name: 'server (toàn server)', value: 'server' },
+        { name: 'channel (chỉ kênh hiện tại)', value: 'channel' },
+      )
+  ),
   
 new SlashCommandBuilder()
   .setName('insta')
@@ -2274,6 +2288,7 @@ if (interaction.commandName === 'fb') {
         },
       ],
     });
+
   } catch (e) {
     console.error('fb handler error:', e?.response?.status, e?.message);
     if (interaction.deferred || interaction.replied) {
@@ -2283,7 +2298,32 @@ if (interaction.commandName === 'fb') {
     }
   }
 }
-// ===================== end /fb handler =====================
+  // === /fbauto handler ===
+if (interaction.commandName === 'fbauto') {
+  const mode = interaction.options.getString('mode', true);
+
+  await loadFacebookSettings();
+  const gid = interaction.guildId;
+  fbSettings.guilds[gid] = fbSettings.guilds[gid] || {};
+
+  if (mode === 'off') {
+    delete fbSettings.guilds[gid];
+    await saveFacebookSettings();
+    return interaction.reply({ content: '✅ Đã tắt auto Facebook cho server này.', ephemeral: true });
+  }
+
+  if (mode === 'server') {
+    fbSettings.guilds[gid] = { mode: 'server' };
+    await saveFacebookSettings();
+    return interaction.reply({ content: '✅ Đã bật auto Facebook cho **toàn server**.', ephemeral: true });
+  }
+
+  if (mode === 'channel') {
+    fbSettings.guilds[gid] = { mode: 'channel', channelId: interaction.channelId };
+    await saveFacebookSettings();
+    return interaction.reply({ content: '✅ Đã bật auto Facebook cho **kênh này**.', ephemeral: true });
+  }
+}
 });
 
 // ------------------- misc helpers -------------------
@@ -3145,7 +3185,130 @@ function trimField(s = '', max = 1024) {
 function safeFilename(name = 'file') {
   return name.replace(/[^\w.\-]+/g, '_');
 }
-// ===================== end Utils Downr =====================
+// ============= Auto Facebook settings =============
+const FB_SETTINGS_FILE = path.join(process.cwd(), 'fb-settings.json');
+let fbSettings = { guilds: {} };
+
+async function loadFacebookSettings() {
+  try {
+    const s = await fs.readFile(FB_SETTINGS_FILE, 'utf8');
+    fbSettings = JSON.parse(s || '{"guilds":{}}');
+  } catch {
+    fbSettings = { guilds: {} };
+  }
+}
+
+async function saveFacebookSettings() {
+  try {
+    await fs.writeFile(FB_SETTINGS_FILE, JSON.stringify(fbSettings, null, 2));
+  } catch (e) {
+    console.warn('saveFacebookSettings error:', e?.message || e);
+  }
+}
+
+// Nhận diện link FB
+function isFacebookUrl(s = '') {
+  return /https?:\/\/(?:(?:www|m)\.)?(?:facebook\.com|fb\.watch)\//i.test(s);
+}
+
+// Dùng lại extractFirstUrl(text) nếu bạn đã có cho instaauto.
+// Nếu CHƯA có thì mở comment dưới:
+// function extractFirstUrl(text = '') { const m = text.match(/https?:\/\/\S+/); return m ? m[0] : ''; }
+// ============= Auto FB trong tin nhắn (gửi file) =============
+client.on('messageCreate', async (msg) => {
+  try {
+    if (!msg.guild || msg.author.bot) return;
+    if (!isFacebookUrl(msg.content || '')) return;
+
+    await loadFacebookSettings();
+    const g = fbSettings.guilds[msg.guild.id] || { mode: 'off' };
+    if (g.mode === 'off') return;
+    if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
+
+    const url = extractFirstUrl(msg.content);
+    if (!url) return;
+
+    console.log('[fbauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
+    await msg.channel.sendTyping();
+
+    // lấy media + meta qua utils Downr hiện có
+    const { medias, meta } = await fetchFacebookViaDownr(url);
+    if (!Array.isArray(medias) || medias.length === 0) return;
+
+    // ----- EMBED giống lệnh /fb -----
+    const embed = new EmbedBuilder()
+      .setColor(0x1877f2)
+      .setTitle('📘 Facebook Downloader')
+      .setDescription('✅ Tải thành công! 🎉')
+      .setFooter({ text: 'Nguồn: Facebook Public Post' })
+      .setTimestamp(new Date());
+
+    if (meta?.thumbnail) embed.setImage(meta.thumbnail);
+    if (meta?.caption || meta?.title) {
+      embed.addFields({
+        name: '📖 Caption',
+        value: trimField(meta.caption || meta.title, 1024),
+      });
+    }
+    if (meta?.author) {
+      embed.addFields({
+        name: '✍️ Tác giả',
+        value: trimField(meta.author, 256),
+        inline: true,
+      });
+    }
+
+    await msg.reply({ embeds: [embed] });
+
+    // ----- GỬI ẢNH: batch tối đa 10 file / tin -----
+    const images = medias.filter(m =>
+      (m.type || '').toLowerCase() === 'image' ||
+      /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(m.url || '')
+    );
+
+    if (images.length) {
+      const atts = images.map((m, i) => ({
+        attachment: m.url,
+        name: safeFilename(`facebook_img_${String(i + 1).padStart(2, '0')}.${m.ext || (/\.(\w+)(?:\?|$)/.exec(m.url || '')?.[1] || 'jpg')}`)
+      }));
+
+      // chia lô 10
+      for (let i = 0; i < atts.length; i += 10) {
+        const batch = atts.slice(i, i + 10);
+        try {
+          await msg.channel.send({ files: batch });
+        } catch (e) {
+          console.error('fbauto image send error:', e);
+        }
+      }
+    }
+
+    // ----- GỬI VIDEO: chọn video "tốt nhất" theo util pickBestMedia -----
+    const videos = medias.filter(m =>
+      (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
+    );
+
+    if (videos.length) {
+      const bestVideo = pickBestMedia(videos);
+      if (bestVideo && bestVideo.url) {
+        try {
+          await msg.channel.send({
+            files: [{
+              attachment: bestVideo.url,
+              name: safeFilename(`facebook.${bestVideo.ext || 'mp4'}`)
+            }]
+          });
+        } catch (e) {
+          // nếu upload video quá nặng -> log và bỏ qua (không gửi nút, theo yêu cầu)
+          console.error('fbauto video send error:', e?.message || e);
+        }
+      }
+    }
+
+  } catch (e) {
+    console.error('fb auto error:', e);
+  }
+});
 
 // ================= Utils cho Downr (Instagram) =================
 
@@ -3318,4 +3481,8 @@ function fmtTime(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+function extractFirstUrl(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
 }

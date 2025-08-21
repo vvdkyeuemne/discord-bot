@@ -1155,9 +1155,7 @@ if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
 
       st.moves.set(`${round}-${interaction.user.id}`, move);
       return interaction.reply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral: true });
-    }
-  } catch (e) {
-    console.error('RPSLS button error:', e);
+   }
     if (!interaction.replied && !interaction.deferred) {
       interaction.reply({ content: '❌ Lỗi xử lý nút.', ephemeral: true }).catch(() => {});
     }

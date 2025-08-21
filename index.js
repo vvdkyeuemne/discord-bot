@@ -3316,7 +3316,7 @@ client.on('messageCreate', async (msg) => {
       }
     }
 
-    // ----- GỬI VIDEO: chọn video “tốt nhất” rồi kiểm tra size -----
+   // ----- GỬI VIDEO: chọn video “tốt nhất” rồi kiểm tra size -----
 const videos = medias.filter(m =>
   (m.type || '').toLowerCase() === 'video' || /\.mp4(?:\?|$)/i.test(m.url || '')
 );
@@ -3354,10 +3354,11 @@ if (videos.length) {
           await msg.channel.send({ content: `${label}\n${bestVideo.url}` });
         }
       }
-  } catch (e) {
-    console.error('fb auto error:', e);
+    } catch (e2) {
+      console.error('fbauto video send error:', e2);
+    }
   }
-});
+}
 // ================= Utils cho Downr (Instagram) =================
 
 /**

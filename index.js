@@ -956,15 +956,7 @@ if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
         );
       await interaction.showModal(modal);
       return;
-    }
-
-  } catch (e) {
-    console.error('TX button error:', e);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Lỗi xử lý nút Tài Xỉu.', ephemeral: true }).catch(() => {});
-    }
-  }
-}
+    } 
 
     // Đặt cược -> mở modal nhập coin
     if (action === 'bet') {
@@ -984,7 +976,13 @@ if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
       await interaction.showModal(modal);
       return;
     }
- 
+ } catch (e) {
+    console.error('TX button error:', e);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: '❌ Lỗi xử lý nút Tài Xỉu.', ephemeral: true }).catch(() => {});
+    }
+  }
+}
       if (interaction.customId === 'meme_refresh') {
         await interaction.deferUpdate();
         try {

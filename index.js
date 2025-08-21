@@ -1083,52 +1083,70 @@ if (interaction.isButton()) {
 
 // ===== Buttons RPSLS =====
 if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
-  const id  = interaction.customId;       // rps_join_<tid> | rps_leave_<tid> | rps_start_<tid> | rps_play_<tid>_<round>_<move>
-  const gid = interaction.guild.id;
-  const st  = rpslsState.get(gid);
-  if (!st) return interaction.reply({ content:'⚠️ Không có giải.', ephemeral:true });
+  try {
+    const id  = String(interaction.customId || '');
+    const gid = interaction.guildId;
+    const st  = rpslsState.get(gid);
 
-  if (id.startsWith('rps_join_')) {
-    if (st.started) return interaction.reply({ content:'Đã bắt đầu.', ephemeral:true });
-    if (st.players.includes(interaction.user.id)) return interaction.reply({ content:'Bạn đã tham gia.', ephemeral:true });
-    if (st.players.length >= st.slots) return interaction.reply({ content:'📦 Đủ slot.', ephemeral:true });
-    if (st.fee>0 && typeof getBal==='function'){
-      if (getBal(interaction.user.id) < st.fee) return interaction.reply({ content:'💸 Không đủ coin.', ephemeral:true });
-      addBal(interaction.user.id, -st.fee);
+    if (!st) return interaction.reply({ content: '⚠️ Không có giải.', ephemeral: true });
+
+    if (id.startsWith('rps_join_')) {
+      if (st.started) return interaction.reply({ content: 'Đã bắt đầu.', ephemeral: true });
+      if (st.players.includes(interaction.user.id)) return interaction.reply({ content: 'Bạn đã tham gia.', ephemeral: true });
+      if (st.players.length >= st.slots) return interaction.reply({ content: '🧱 Đủ slot.', ephemeral: true });
+      if (st.fee > 0 && typeof getBal === 'function' && getBal(interaction.user.id) < st.fee)
+        return interaction.reply({ content: '💸 Không đủ coin.', ephemeral: true });
+
+      if (st.fee > 0 && typeof addBal === 'function') addBal(interaction.user.id, -st.fee);
+      st.players.push(interaction.user.id);
+      await updateLobby(interaction, st);
+      return interaction.reply({ content: '✅ Đã tham gia!', ephemeral: true });
     }
-    st.players.push(interaction.user.id);
-    await updateLobby(interaction, st);
-    return interaction.reply({ content:'✅ Đã tham gia!', ephemeral:true });
-  }
 
-  if (id.startsWith('rps_leave_')) {
-    if (st.started) return interaction.reply({ content:'Đã bắt đầu.', ephemeral:true });
-    const i = st.players.indexOf(interaction.user.id);
-    if (i>=0) st.players.splice(i,1);
-    await updateLobby(interaction, st);
-    return interaction.reply({ content:'🚪 Đã rút.', ephemeral:true });
-  }
+    if (id.startsWith('rps_leave_')) {
+      if (st.started) return interaction.reply({ content: 'Đã bắt đầu.', ephemeral: true });
+      const i = st.players.indexOf(interaction.user.id);
+      if (i >= 0) st.players.splice(i, 1);
+      await updateLobby(interaction, st);
+      return interaction.reply({ content: '🚪 Đã rút.', ephemeral: true });
+    }
 
-  if (id.startsWith('rps_start_')) {
-    if (interaction.user.id !== st.host && !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
-      return interaction.reply({ content:'❌ Chỉ host/admin.', ephemeral:true });
-    if (st.players.length < 2) return interaction.reply({ content:'Cần ít nhất 2 người.', ephemeral:true });
-    await interaction.reply({ content:'🚀 Bắt đầu!', ephemeral:true });
-    return startTournament(interaction.client, st);
-  }
+    if (id.startsWith('rps_start_')) {
+      if (interaction.user.id !== st.host &&
+          !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
+        return interaction.reply({ content: '❌ Chỉ host/admin.', ephemeral: true });
+      }
+      if (st.players.length < 2) {
+        return interaction.reply({ content: 'Cần ít nhất 2 người.', ephemeral: true });
+      }
+      await interaction.reply({ content: '🚀 Bắt đầu!', ephemeral: true });
+      return startTournament(interaction.client, st);
+    }
 
-  if (id.startsWith('rps_play_')) {
-    const parts = id.split('_'); // ['rps','play',tid,round,move]
-    const round = Number(parts[3]||0);
-    const move  = String(parts[4]||'');
-    if (!st.started || st.round !== round) return interaction.reply({ content:'⏳ Round đã đổi.', ephemeral:true });
-    const pair = st.currentPair;
-    if (!pair || ![pair.a, pair.b].includes(interaction.user.id))
-      return interaction.reply({ content:'Chưa tới lượt bạn.', ephemeral:true });
-    if (!RPS.moves.includes(move)) return interaction.reply({ content:'Nước đi không hợp lệ.', ephemeral:true });
-    st.moves.set(`${round}-${interaction.user.id}`, move);
-    return interaction.reply({ content:`Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral:true });
+    if (id.startsWith('rps_play_')) {
+      const parts = id.split('_');        // ['rps','play','tid','round','move']
+      const round = Number(parts[3]) || 0;
+      const move  = parts[4];
+      if (!st.started || st.round !== round)
+        return interaction.reply({ content: '⏳ Round khác.', ephemeral: true });
+
+      const pair = st.currentPair;
+      if (!pair || ![pair.a, pair.b].includes(interaction.user.id))
+        return interaction.reply({ content: 'Chưa tới lượt bạn.', ephemeral: true });
+
+      if (!RPS.moves.includes(move))
+        return interaction.reply({ content: 'Nước đi không hợp lệ.', ephemeral: true });
+
+      st.moves.set(`${round}-${interaction.user.id}`, move);
+      return interaction.reply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.`, ephemeral: true });
+    }
+  } catch (e) {
+    console.error('RPSLS button error:', e);
+    if (!interaction.replied && !interaction.deferred) {
+      interaction.reply({ content: '❌ Lỗi xử lý nút.', ephemeral: true }).catch(() => {});
+    }
   }
+  return; // chặn không rơi xuống các handler khác
 }
     
       // ship reroll
@@ -1576,8 +1594,9 @@ if (interaction.commandName === 'rpsls') {
       .addFields({ name:'Người chơi', value:'(chưa có)' })
       .setFooter({ text:`TID: ${tid}` });
 
-    const msg = await interaction.reply({ embeds:[embed], components: lobbyButtons(tid) });
-    state.msgLobbyId = msg.id;
+    await interaction.reply({ embeds:[embed], components: lobbyButtons(tid) });
+const msg = await interaction.fetchReply();
+state.msgLobbyId = msg.id;      // lưu id để các nút JOIN/LEAVE/START update được
     return;
   }
 

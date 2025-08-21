@@ -658,7 +658,21 @@ new SlashCommandBuilder()
      .setDescription('Dán link Instagram vào đây')
      .setRequired(true)
   ),
-  
+
+new SlashCommandBuilder()
+  .setName('instaauto')
+  .setDescription('Bật/tắt chế độ tự động xử lý link Instagram trong server/kênh')
+  .addStringOption(o =>
+    o.setName('mode')
+     .setDescription('Chọn chế độ auto')
+     .addChoices(
+       { name: 'off (tắt)', value: 'off' },
+       { name: 'server (toàn server)', value: 'server' },
+       { name: 'channel (chỉ kênh hiện tại)', value: 'channel' },
+     )
+     .setRequired(true)
+  ),
+    
   // === /tiktokinfo ===
 new SlashCommandBuilder()
   .setName('tiktokinfo')
@@ -2187,6 +2201,25 @@ await interaction.editReply({
     }
   }
 } 
+  // === /instaauto ===
+if (interaction.commandName === 'instaauto') {
+  const mode = interaction.options.getString('mode', true);
+  await loadInstaSettings();
+  const gid = interaction.guildId;
+
+  instaSettings.guilds[gid] = {
+    mode,
+    channelId: interaction.channelId, // dùng khi chọn 'channel'
+  };
+  await saveInstaSettings();
+
+  const msg =
+    mode === 'off'    ? 'Đã tắt auto Instagram cho server này.'
+  : mode === 'server' ? 'Đã bật auto Instagram cho toàn server.'
+                      : 'Đã bật auto Instagram cho kênh này.';
+
+  return interaction.reply({ content: `✅ ${msg}`, ephemeral: true });
+}
  // ===================== /fb handler (Downr) =====================
 if (interaction.commandName === 'fb') {
   const link = interaction.options.getString('url', true).trim();
@@ -3200,6 +3233,84 @@ async function fetchInstagramViaDownr(rawUrl) {
 
   return { medias, meta };
 }
+// ============= Auto Instagram settings =============
+const INSTA_SETTINGS_FILE = path.join(process.cwd(), 'insta-settings.json');
+let instaSettings = { guilds: {} };
+
+async function loadInstaSettings() {
+  try {
+    const s = await fs.readFile(INSTA_SETTINGS_FILE, 'utf8');
+    instaSettings = JSON.parse(s || '{"guilds":{}}');
+  } catch { instaSettings = { guilds: {} }; }
+}
+
+async function saveInstaSettings() {
+  try {
+    await fs.writeFile(INSTA_SETTINGS_FILE, JSON.stringify(instaSettings, null, 2));
+  } catch (e) { console.warn('saveInstaSettings error:', e?.message || e); }
+}
+
+// Nhận diện IG URL & rút URL đầu tiên
+function isInstagramUrl(s = '') {
+  return /https?:\/\/(?:www\.)?instagram\.com\/[^\s]+/i.test(s);
+}
+function extractFirstUrl(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
+}
+// ============= Auto IG trong tin nhắn =============
+client.on('messageCreate', async (msg) => {
+  try {
+    if (!msg.guild || msg.author.bot) return;
+    if (!isInstagramUrl(msg.content || '')) return;
+
+    await loadInstaSettings();
+    const g = instaSettings.guilds[msg.guild.id] || { mode: 'off' };
+    if (g.mode === 'off') return;
+    if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
+
+    const url = extractFirstUrl(msg.content);
+    if (!url) return;
+
+    console.log('[instaauto] hit', { gid: msg.guild.id, cid: msg.channel.id, url });
+    await msg.channel.sendTyping();
+
+    // lấy dữ liệu qua utils Downr (bạn đã thêm fetchInstagramViaDownr trước đó)
+    const { medias, meta } = await fetchInstagramViaDownr(url);
+    if (!Array.isArray(medias) || medias.length === 0) return;
+
+    // --- Build embed ---
+    const cap = meta?.caption || '';
+    const embed = new EmbedBuilder()
+      .setColor(0xff3399)
+      .setTitle('📷 Instagram Downloader')
+      .setDescription(cap.length > 800 ? cap.slice(0, 800) + '…' : cap)
+      .setFooter({ text: `Nguồn: Instagram • Tác giả: ${meta?.author || ''}` })
+      .setTimestamp(new Date());
+
+    if (meta?.thumbnail && /^https?:\/\/\S+/i.test(meta.thumbnail)) {
+      embed.setImage(meta.thumbnail);
+    }
+
+    // --- Tạo tối đa 20 nút "Mở media" ---
+    const top = medias.slice(0, 20);
+    const btns = top.map((m, i) =>
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel(`${/video/i.test(m.type || '') ? '🎬' : '🖼️'} Mở media ${i + 1}${m.quality ? ` • ${m.quality}` : ''}`)
+        .setURL(m.url)
+    );
+
+    const rows = [];
+    for (let i = 0; i < btns.length; i += 5) {
+      rows.push(new ActionRowBuilder().addComponents(...btns.slice(i, i + 5)));
+    }
+
+    await msg.reply({ embeds: [embed], components: rows });
+  } catch (e) {
+    console.error('insta auto error:', e);
+  }
+});
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

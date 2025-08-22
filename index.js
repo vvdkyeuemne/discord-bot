@@ -249,13 +249,6 @@ await ch.send({
   components: [ rpsPlayRow(st.tid, st.round) ],
 });
 
-    // gửi thông báo round 1 + nút chọn nước đi
-    const ch = await client.channels.fetch(st.channelId);
-    const p = st.currentPair;
-    await ch.send({
-      content: `**Round ${st.round}**: <@${p.a}> vs <@${p.b}> — chọn nước đi!`,
-      components: [rpsPlayRow(st.tid, st.round)],
-    });
   } catch (e) {
     console.error('[RPSLS] startTournament error:', e);
   }

@@ -226,6 +226,7 @@ async function startTournament(client, st) {
     st.winners = [];           // danh sách người thắng của round hiện tại
     st.currentPairIndex = 0;   // index cặp đang đánh trong st.bracket
     st.currentPair = null;     // cặp hiện tại
+    st.resolvedPairs = new Set(); // đánh dấu các cặp đã xử lý xong
     
     // tạo cặp theo thứ tự người chơi
     const players = [...st.players];
@@ -1054,7 +1055,12 @@ if (isBtn && id.startsWith('rps_')) {
       await interaction.editReply({ content: '⚠️ Không có giải.' });
       return;
     }
-
+const pid = st.currentPair ? `${st.round}-${st.currentPair.a}-${st.currentPair.b}` : null;
+if (pid && st.resolvedPairs?.has(pid)) {
+  await interaction.editReply({ content: '⏳ Cặp này đã được xử lý, vui lòng chờ round mới.' });
+  return;
+}
+    
     // JOIN
     if (id.startsWith('rps_join_')) {
       if (st.started) { await interaction.editReply({ content: 'Đã bắt đầu.' }); return; }
@@ -1153,6 +1159,7 @@ if (id.startsWith('rps_play_')) {
       `**Round ${round}**: <@${pair.a}> (${RPS.emoji(aMove)}) vs <@${pair.b}> (${RPS.emoji(bMove)}) → **<@${winner}> thắng**!`
     );
     st.winners.push(winner);
+    if (pid) st.resolvedPairs.add(pid);
   }
 
   // Sang cặp tiếp theo trong cùng round
@@ -1166,7 +1173,6 @@ if (id.startsWith('rps_play_')) {
     });
     return;
   }
-
   // Hết round – chuẩn bị round mới hoặc kết thúc
 if (st.winners.length === 1) {
   const champ = st.winners[0];

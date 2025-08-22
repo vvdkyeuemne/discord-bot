@@ -957,49 +957,43 @@ if (isBtn && id.startsWith('tx_')) {
       return;
     }
   }
-       if (isBtn && id === 'meme_refresh') {
-        await interaction.deferUpdate();
-        try {
-          const { data } = await axios.get('https://meme-api.com/gimme');
-          const { title, url, postLink, author, subreddit, ups } = data;
-          const embed = new EmbedBuilder()
-          .setTitle(title || 'Meme')
-          .setURL(postLink || 'https://reddit.com')
-          .setImage(url)
-          .addFields(
-            { name: 'Subreddit', value: `r/${subreddit}`, inline: true },
-            { name: 'Tác giả', value: author || 'N/A', inline: true },
-            { name: '👍', value: String(ups ?? 0), inline: true },
-          )
-          .setColor(0x5865F2);
-          await interaction.followUp({ embeds:[embed], components:[row] });
-          
 // ===== RPSLS buttons =====
 if (isBtn && id.startsWith('rps_')) {
-if (isBtn) console.log('[BTN]', id, 'at', new Date().toISOString());
+  // Log khi bấm nút
+  console.log('[RPSLS] click:', id, 'at', new Date().toISOString());
+
+  // ACK NGAY để tránh timeout 3s
+  const t0 = Date.now();
+  let acked = false;
   try {
-    // Ack NGAY để tránh timeout
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
-    
+    await interaction.deferReply({ ephemeral: true });
+    acked = true;
+    console.log('[RPSLS] deferReply OK in', Date.now() - t0, 'ms');
+  } catch (e) {
+    console.error('[RPSLS] deferReply FAILED:', e);
+    return; // không ACK được thì dừng, tránh lỗi tiếp
+  }
+
+  try {
     const gid = interaction.guildId;
     const st  = rpslsState.get(gid);
 
-    if (!st) { 
+    if (!st) {
       await interaction.editReply({ content: '⚠️ Không có giải.' });
       return;
     }
 
     // JOIN
     if (id.startsWith('rps_join_')) {
-      if (st.started)         { await interaction.editReply({ content: 'Đã bắt đầu.' }); return; }
+      if (st.started) { await interaction.editReply({ content: 'Đã bắt đầu.' }); return; }
       if (st.players.includes(interaction.user.id)) { await interaction.editReply({ content: 'Bạn đã tham gia.' }); return; }
-      if (st.players.length >= st.slots)            { await interaction.editReply({ content: '❌ Đủ slot.' }); return; }
+      if (st.players.length >= st.slots) { await interaction.editReply({ content: '❌ Đủ slot.' }); return; }
       if (st.fee > 0 && typeof getBal === 'function' && getBal(interaction.user.id) < st.fee) {
-        await interaction.editReply({ content: '💸 Không đủ coin.' }); 
-        return;
+        await interaction.editReply({ content: '💸 Không đủ coin.' }); return;
       }
       if (st.fee > 0 && typeof addBal === 'function') addBal(interaction.user.id, -st.fee);
       st.players.push(interaction.user.id);
+
       await updateLobby(interaction, st).catch(console.error);
       await interaction.editReply({ content: '✅ Đã tham gia!' });
       return;
@@ -1021,20 +1015,22 @@ if (isBtn) console.log('[BTN]', id, 'at', new Date().toISOString());
         interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator);
       if (!isHostOrAdmin) { await interaction.editReply({ content: '❌ Chỉ host/admin.' }); return; }
       if (st.players.length < 2) { await interaction.editReply({ content: '⚠️ Cần ít nhất 2 người.' }); return; }
+
       await interaction.editReply({ content: '🚀 Bắt đầu!' });
       return startTournament(interaction.client, st);
     }
 
     // PLAY
     if (id.startsWith('rps_play_')) {
-      const parts = id.split('_');            // ['rps','play',tid,round,move]
+      const parts = id.split('_');     // ['rps','play','tid','round','move']
       const round = Number(parts[3]) || 0;
       const move  = parts[4];
 
-      if (!st.started || st.round !== round) { await interaction.editReply({ content: '🍵 Round khác.' }); return; }
+      if (!st.started || st.round !== round) { await interaction.editReply({ content: '⏳ Round khác.' }); return; }
+
       const pair = st.currentPair;
       if (!pair || !(pair.a === interaction.user.id || pair.b === interaction.user.id)) {
-        await interaction.editReply({ content: '⏳ Chưa tới lượt bạn.' }); return;
+        await interaction.editReply({ content: '⛔ Chưa tới lượt bạn.' }); return;
       }
       if (!RPS.moves.includes(move)) { await interaction.editReply({ content: '❌ Nước đi không hợp lệ.' }); return; }
 
@@ -1043,19 +1039,39 @@ if (isBtn) console.log('[BTN]', id, 'at', new Date().toISOString());
       return;
     }
 
-    // Nếu click RPSLS nhưng không trúng nhánh nào:
-    await interaction.editReply({ content: '⚠️ Nút không hợp lệ.' });
+    // Không trúng case nào
+    await interaction.editReply({ content: '❓ Nút không hợp lệ.' });
+
   } catch (e) {
-    console.error('RPSLS button error:', e);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Lỗi xử lý nút RPSLS.', ephemeral: true }).catch(() => {});
+    console.error('[RPSLS] handler error:', e);
+    // Chỉ gửi khi đã ACK (acked = true)
+    if (acked && !interaction.replied && !interaction.deferred) {
+      // bình thường không vào đây vì đã defer + editReply, nhưng giữ dự phòng
+      await interaction.followUp({ content: '❌ Lỗi xử lý nút RPSLS.', ephemeral: true }).catch(() => {});
     } else {
+      // đã defer => dùng editReply
       await interaction.editReply({ content: '❌ Lỗi xử lý nút RPSLS.' }).catch(() => {});
     }
   }
-  return; // chặn rơi xuống handler khác
-
 }
+  
+       if (isBtn && id === 'meme_refresh') {
+        await interaction.deferUpdate();
+        try {
+          const { data } = await axios.get('https://meme-api.com/gimme');
+          const { title, url, postLink, author, subreddit, ups } = data;
+          const embed = new EmbedBuilder()
+          .setTitle(title || 'Meme')
+          .setURL(postLink || 'https://reddit.com')
+          .setImage(url)
+          .addFields(
+            { name: 'Subreddit', value: `r/${subreddit}`, inline: true },
+            { name: 'Tác giả', value: author || 'N/A', inline: true },
+            { name: '👍', value: String(ups ?? 0), inline: true },
+          )
+          .setColor(0x5865F2);
+          await interaction.followUp({ embeds:[embed], components:[row] });
+          
       // ===== Quiz: trả lời =====
 if (isBtn && id.startsWith('quiz_ans_')) {
   const parts = id.split('_');                // ["quiz","ans","<interactionId>","<idx>"]

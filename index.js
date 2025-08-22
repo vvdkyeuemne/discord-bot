@@ -1167,13 +1167,28 @@ if (id.startsWith('rps_play_')) {
     return;
   }
 
-  // Hết round → chuẩn bị round mới hoặc kết thúc
-  if (st.winners.length === 1) {
-    const champ = st.winners[0];
-    await ch.send(`🏆 **Giải kết thúc**! Quán quân: <@${champ}>`);
-    rpslsState.set(gid, null);
-    return;
+  // Hết round – chuẩn bị round mới hoặc kết thúc
+if (st.winners.length === 1) {
+  const champ = st.winners[0];
+
+  // Tổng thưởng = quỹ lệ phí + phần thưởng cấu hình
+  const feePool   = (st.fee ?? 0) * (st.players?.length ?? 0);
+  const basePrize = st.reward ?? 0;
+  const prize     = feePool + basePrize;
+
+  // Cộng coin cho quán quân (nếu hàm addBal có tồn tại trong bot của bạn)
+  if (typeof addBal === 'function' && prize > 0) {
+    try { await addBal(champ, prize); } catch (_) {}
   }
+
+  await ch.send({
+    content: `🏆 **Giải kết thúc!** Quán quân: <@${champ}> nhận **${prize.toLocaleString('vi-VN')}** coin.`,
+  });
+
+  // Xoá state giải
+  rpslsState.set(gid, null);
+  return;
+}
 
   // Tạo bracket round kế tiếp từ winners
   st.bracket = [];

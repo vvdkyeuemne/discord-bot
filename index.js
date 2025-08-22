@@ -938,12 +938,22 @@ const TX = {
       .setTitle('🎰 Tài Xỉu CLB – Mini Game')
       .setColor(0x00bfff)
       .setDescription(`⏰ **Còn lại:** **${left} giây**\n👑 **Người làm cái:** ${s.dealerId?`<@${s.dealerId}>`:'Chưa có'}\n⚠️ **Giới hạn:** ${TX.fmt(s.min)} – ${TX.fmt(s.max)} coin`)
-      .addFields(
-        { name:'🔵 Tài', value:`Người cược: **${[...s.bets.values()].filter(b=>b.side==='tai').length}**\nTổng: **${TX.fmt(s.total.tai)}**`, inline:true },
-        { name:'🔴 Xỉu', value:`Người cược: **${[...s.bets.values()].filter(b=>b.side==='xiu').length}**\nTổng: **${TX.fmt(s.total.xiu)}**`, inline:true },
-      )
-      .setFooter({ text:`Phiên #${s.roundId} • ${TX.now()}` });
+      const listTai = [...(s.bets?.values() || [])].filter(b => b?.side === 'tai');
+const listXiu = [...(s.bets?.values() || [])].filter(b => b?.side === 'xiu');
+const sum = arr => arr.reduce((a, b) => a + (Number(b?.amount) || 0), 0);
+
+.addFields(
+  { 
+    name:'🔵 Tài', 
+    value:`Người cược: **${listTai.length}**\nTổng: **${sum(listTai).toLocaleString('vi-VN')}**`, 
+    inline:false 
   },
+  { 
+    name:'🔴 Xỉu', 
+    value:`Người cược: **${listXiu.length}**\nTổng: **${sum(listXiu).toLocaleString('vi-VN')}**`, 
+    inline:false 
+  },
+)
 row(roundId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`tx_bet_tai_${roundId}`).setStyle(ButtonStyle.Primary).setLabel('💙 Đặt TÀI'),
@@ -1013,22 +1023,76 @@ if (isBtn && id.startsWith('tx_')) {
   }
 
     if (action === 'bet') {
-      const modal = new ModalBuilder()
-        .setCustomId(`tx_modal_${s.side}_${roundId}`)
-        .setTitle(s.side === 'tai' ? '🎲 ĐẶT TÀI!' : '🎲 ĐẶT XỈU!')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('amount')
-              .setLabel('Nhập số coin muốn cược')
-              .setStyle(TextInputStyle.Short)
-              .setPlaceholder('ví dụ: 1000')
-              .setRequired(true)
-          )
-        );
-      await interaction.showModal(modal);
-      return;
+  // LẤY side TỪ customId: tx_bet_<side>_<roundId>
+  const side = parts[2];              // 'tai' | 'xiu'
+  const roundId = parts[3];
+
+  const modal = new ModalBuilder()
+    .setCustomId(`tx_modal_${side}_${roundId}`)        // <-- dùng side ở đây
+    .setTitle(side === 'tai' ? '🎲 ĐẶT TÀI!' : '🎲 ĐẶT XỈU!')  // <-- và ở đây
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('amount')
+          .setLabel('Nhập số coin muốn cược')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('ví dụ: 1000')
+          .setRequired(true)
+      )
+    );
+  await interaction.showModal(modal);
+  return;
+}
+  // ==== Modal TÀI/XỈU ====
+if (interaction.isModalSubmit() && interaction.customId.startsWith('tx_modal_')) {
+  // customId: tx_modal_<side>_<roundId>
+  const [, , side, rid] = interaction.customId.split('_');
+
+  const gid = interaction.guildId;
+  const s   = taiXiuState.get(gid);
+  if (!s || String(s.roundId) !== String(rid)) {
+    return interaction.reply({ content:'⚠️ Phiên không tồn tại hoặc đã kết thúc.', ephemeral:true });
+  }
+  if (s.locked) {
+    return interaction.reply({ content:'⛔ Đã khoá đặt cược, vui lòng chờ kết quả.', ephemeral:true });
+  }
+
+  const raw = interaction.fields.getTextInputValue('amount') || '0';
+  const amount = Math.floor(Number(String(raw).replace(/[_.\s]/g,'')) || 0);
+  if (amount < s.min || amount > s.max) {
+    return interaction.reply({
+      content:`⚠️ Giới hạn: ${s.min.toLocaleString('vi-VN')} – ${s.max.toLocaleString('vi-VN')} coin.`,
+      ephemeral:true
+    });
+  }
+
+  // Ví tiền (nếu có)
+  if (typeof getBal === 'function' && typeof addBal === 'function') {
+    const bal = getBal(interaction.user.id) || 0;
+    if (bal < amount) {
+      return interaction.reply({ content:'💸 Không đủ coin.', ephemeral:true });
     }
+    addBal(interaction.user.id, -amount);
+  }
+
+  // Lưu cược
+  s.bets ??= new Map();
+  const prev = s.bets.get(interaction.user.id) || { side, amount: 0 };
+  s.bets.set(interaction.user.id, { side, amount: (prev.side === side ? prev.amount : 0) + amount });
+
+  // Cập nhật message chính ngay lập tức
+  try {
+    const ch = await interaction.client.channels.fetch(s.channelId);
+    await ch.messages.edit(s.msgId, { embeds: [TX.render(gid)], components: [TX.row(s.roundId)] });
+  } catch (e) {
+    console.error('[TX] update after bet failed:', e);
+  }
+
+  return interaction.reply({
+    content:`✅ Đặt **${amount.toLocaleString('vi-VN')}** coin cho **${side.toUpperCase()}** thành công!`,
+    ephemeral:true
+  });
+}
   }
 // ===== RPSLS buttons =====
 if (isBtn && id.startsWith('rps_')) {

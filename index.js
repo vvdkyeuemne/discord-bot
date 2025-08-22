@@ -216,6 +216,50 @@ async function updateLobby(interaction, st) {
     console.error('[RPSLS] updateLobby failed:', e);
   }
 }
+// === Bắt đầu giải & tạo cặp đấu ===
+async function startTournament(client, st) {
+  try {
+    // đánh dấu đã bắt đầu
+    st.started = true;
+    st.round = 1;
+    st.moves = new Map();        // key: `${round}-${uid}` -> 'rock'|'paper'|'scissors'|'lizard'|'spock'
+
+    // tạo cặp theo thứ tự người chơi
+    const players = [...st.players];
+    if (players.length < 2) return;
+
+    const pairs = [];
+    for (let i = 0; i < players.length; i += 2) {
+      const a = players[i];
+      const b = players[i + 1];
+      if (b) pairs.push({ a, b });
+    }
+
+    st.bracket = pairs;
+    st.currentPair = pairs[0];
+
+    // gửi thông báo round 1 + nút chọn nước đi
+    const ch = await client.channels.fetch(st.channelId);
+    const p = st.currentPair;
+    await ch.send({
+      content: `**Round ${st.round}**: <@${p.a}> vs <@${p.b}> — chọn nước đi!`,
+      components: [rpsPlayRow(st.tid, st.round)],
+    });
+  } catch (e) {
+    console.error('[RPSLS] startTournament error:', e);
+  }
+}
+
+// Hàng nút chọn nước đi cho RPSLS
+function rpsPlayRow(tid, round) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_rock`).setLabel('Rock').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_paper`).setLabel('Paper').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_scissors`).setLabel('Scissors').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_lizard`).setLabel('Lizard').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_spock`).setLabel('Spock').setStyle(ButtonStyle.Primary),
+  );
+}
 // === TikTok auto settings (JSON) ===
 const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
 let tiktokSettings = { guilds: {} };

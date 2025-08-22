@@ -975,6 +975,7 @@ if (isBtn && id.startsWith('tx_')) {
           
 // ===== RPSLS buttons =====
   if (isBtn && id.startsWith('rps_')) {
+    try {
     const gid = interaction.guildId;
     const st = rpslsState.get(gid);
     if (!st) { await interaction.reply({ content: '⚠️ Không có giải.', ephemeral: true }); return; }

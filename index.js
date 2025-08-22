@@ -1166,8 +1166,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.error('Button handler error:', e);
     }
     return;
-      }
-  });
+      } 
 
 // ====== Tai Xiu modal submit ======
   if (interaction.isModalSubmit() && interaction.customId.startsWith('tx_modal_')) {

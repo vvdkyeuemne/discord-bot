@@ -1180,6 +1180,10 @@ if (st.winners.length === 1) {
   if (typeof addBal === 'function' && prize > 0) {
     try { await addBal(champ, prize); } catch (_) {}
   }
+  // Gắn huy hiệu quán quân
+if (typeof addBadge === 'function') {
+  try { addBadge(champ, '🏆 Quán quân RPSLS'); } catch (_) {}
+        }
 
   await ch.send({
     content: `🏆 **Giải kết thúc!** Quán quân: <@${champ}> nhận **${prize.toLocaleString('vi-VN')}** coin.`,
@@ -2073,7 +2077,33 @@ async function playNextPair(client, st){
         ).setColor(color)
         .setFooter({ text:`Yêu cầu bởi ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() }).setTimestamp();
       const b = badges[targetUser.id] || [];
-      if (b.length) embed.addFields({ name:'🏅 Huy hiệu', value: b.map(x=>'• '+x).join('\n') });
+      // ===== HUY HIỆU (badges) =====
+
+// badges lưu trong file (loại "tĩnh")
+const staticBadges = badges[targetUser.id] || [];
+
+// badges "động" (tự tính theo điều kiện)
+const dynBadges = [];
+
+// ví dụ các ngưỡng coin -> huy hiệu
+const gcoins = (coins?.[interaction.guildId]?.[targetUser.id]) ?? 0;
+if (gcoins >= 10_000_000) dynBadges.push('👑 Đại gia 10M+');
+else if (gcoins >= 1_000_000) dynBadges.push('💎 Đại gia 1M+');
+
+// admin -> huy hiệu
+if (member?.permissions?.has(PermissionsBitField.Flags.Administrator)) {
+  dynBadges.push('🛡️ Admin');
+}
+
+// gộp & loại trùng
+const allBadges = [...new Set([...staticBadges, ...dynBadges])];
+
+// thêm field vào embed
+embed.addFields({
+  name: '🎖️ Huy hiệu',
+  value: allBadges.length ? allBadges.join(' · ') : 'Không có',
+  inline: false,
+});
       if (bannerURL) embed.setImage(bannerURL);
       const buttons = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('🔗 Mở Avatar').setStyle(ButtonStyle.Link).setURL(avatarURL));
       if (bannerURL) buttons.addComponents(new ButtonBuilder().setLabel('🔗 Mở Banner').setStyle(ButtonStyle.Link).setURL(bannerURL));

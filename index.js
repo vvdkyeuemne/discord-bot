@@ -223,7 +223,10 @@ async function startTournament(client, st) {
     st.started = true;
     st.round = 1;
     st.moves = new Map();        // key: `${round}-${uid}` -> 'rock'|'paper'|'scissors'|'lizard'|'spock'
-
+    st.winners = [];           // danh sách người thắng của round hiện tại
+    st.currentPairIndex = 0;   // index cặp đang đánh trong st.bracket
+    st.currentPair = null;     // cặp hiện tại
+    
     // tạo cặp theo thứ tự người chơi
     const players = [...st.players];
     if (players.length < 2) return;
@@ -237,6 +240,14 @@ async function startTournament(client, st) {
 
     st.bracket = pairs;
     st.currentPair = pairs[0];
+    st.currentPairIndex = 0;
+st.currentPair = st.bracket[0];
+const ch = await client.channels.fetch(st.channelId);
+const p = st.currentPair;
+await ch.send({
+  content: `**Round ${st.round}**: <@${p.a}> vs <@${p.b}> — chọn nước đi!`,
+  components: [ rpsPlayRow(st.tid, st.round) ],
+});
 
     // gửi thông báo round 1 + nút chọn nước đi
     const ch = await client.channels.fetch(st.channelId);
@@ -1088,27 +1099,109 @@ if (isBtn && id.startsWith('rps_')) {
       return startTournament(interaction.client, st);
     }
 
-    // PLAY
-    if (id.startsWith('rps_play_')) {
-      const parts = id.split('_');     // ['rps','play','tid','round','move']
-      const round = Number(parts[3]) || 0;
-      const move  = parts[4];
+   // PLAY
+if (id.startsWith('rps_play_')) {
+  // id format: rps_play_<tid>_<round>_<move>
+  const parts = id.split('_');
+  const tid   = parts[2];
+  const round = Number(parts[3]) || 0;
+  const move  = parts[4]; // rock|paper|scissors|lizard|spock
 
-      if (!st.started || st.round !== round) { await interaction.editReply({ content: '⏳ Round khác.' }); return; }
+  const gid = interaction.guildId;
+  const st  = rpslsState.get(gid);
 
-      const pair = st.currentPair;
-      if (!pair || !(pair.a === interaction.user.id || pair.b === interaction.user.id)) {
-        await interaction.editReply({ content: '⛔ Chưa tới lượt bạn.' }); return;
+  if (!st || !st.started || st.tid !== tid || st.round !== round) {
+    await interaction.editReply({ content: '⚠️ Round khác hoặc giải đã kết thúc.' });
+    return;
+  }
+
+  const pair = st.currentPair;
+  if (!pair || (pair.a !== interaction.user.id && pair.b !== interaction.user.id)) {
+    await interaction.editReply({ content: '❌ Chưa tới lượt bạn.' });
+    return;
+  }
+
+  if (!RPS.moves.includes(move)) {
+    await interaction.editReply({ content: '❌ Nước đi không hợp lệ.' });
+    return;
+  }
+
+  const key = `${round}-${interaction.user.id}`;
+  if (st.moves.has(key)) {
+    await interaction.editReply({ content: '⏳ Bạn đã chọn rồi.' });
+    return;
+  }
+
+  st.moves.set(key, move);
+  await interaction.editReply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.` });
+
+  // Kiểm tra đủ 2 nước đi
+  const aMove = st.moves.get(`${round}-${pair.a}`);
+  const bMove = st.moves.get(`${round}-${pair.b}`);
+  if (!aMove || !bMove) return;
+
+  // Quyết định thắng/thua/hòa
+  let winner = null;
+  const w = RPS.win(aMove, bMove); // 1: a thắng, -1: b thắng, 0: hòa
+  const ch = await interaction.client.channels.fetch(st.channelId);
+
+  if (w === 0) {
+    await ch.send(`**Round ${round}**: hòa (${RPS.emoji(aMove)} vs ${RPS.emoji(bMove)}) → chọn lại!`);
+    st.moves.delete(`${round}-${pair.a}`);
+    st.moves.delete(`${round}-${pair.b}`);
+    await ch.send({
+      content: `<@${pair.a}> vs <@${pair.b}> — chọn nước đi!`,
+      components: [ rpsPlayRow(st.tid, round) ],
+    });
+    return;
+  } else {
+    winner = (w === 1) ? pair.a : pair.b;
+    await ch.send(
+      `**Round ${round}**: <@${pair.a}> (${RPS.emoji(aMove)}) vs <@${pair.b}> (${RPS.emoji(bMove)}) → **<@${winner}> thắng**!`
+    );
+    st.winners.push(winner);
+  }
+
+  // Sang cặp tiếp theo trong cùng round
+  st.currentPairIndex = (st.currentPairIndex ?? 0) + 1;
+  if (st.currentPairIndex < st.bracket.length) {
+    st.currentPair = st.bracket[st.currentPairIndex];
+    const p = st.currentPair;
+    await ch.send({
+      content: `**Round ${st.round}**: <@${p.a}> vs <@${p.b}> — chọn nước đi!`,
+      components: [ rpsPlayRow(st.tid, st.round) ],
+    });
+    return;
+  }
+
+  // Hết round → chuẩn bị round mới hoặc kết thúc
+  if (st.winners.length === 1) {
+    const champ = st.winners[0];
+    await ch.send(`🏆 **Giải kết thúc**! Quán quân: <@${champ}>`);
+    rpslsState.set(gid, null);
+    return;
+  }
+
+  // Tạo bracket round kế tiếp từ winners
+  st.bracket = [];
+  for (let i = 0; i < st.winners.length; i += 2) {
+    const a = st.winners[i];
+    const b = st.winners[i + 1];
+    if (b) st.bracket.push({ a, b });
+  }
+  st.round += 1;
+  st.winners = [];
+  st.currentPairIndex = 0;
+  st.moves = new Map();
+  st.currentPair = st.bracket[0];
+
+  const p2 = st.currentPair;
+  await ch.send({
+    content: `**Round ${st.round}**: <@${p2.a}> vs <@${p2.b}> — chọn nước đi!`,
+    components: [ rpsPlayRow(st.tid, st.round) ],
+  });
+  return;
       }
-      if (!RPS.moves.includes(move)) { await interaction.editReply({ content: '❌ Nước đi không hợp lệ.' }); return; }
-
-      st.moves.set(`${round}-${interaction.user.id}`, move);
-      await interaction.editReply({ content: `Bạn đã chọn **${RPS.emoji(move)}**.` });
-      return;
-    }
-
-    // Không trúng case nào
-    await interaction.editReply({ content: '❓ Nút không hợp lệ.' });
 
   } catch (e) {
     console.error('[RPSLS] handler error:', e);

@@ -915,6 +915,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Guard cho button
   const isBtn = typeof interaction.isButton === 'function' && interaction.isButton();
   const id = isBtn ? String(interaction.customId || '') : '';
+  console.log('Interaction type:', interaction.type, 'customId:', interaction.customId);
   
   // ===== TÀI XỈU =====
 if (isBtn && id.startsWith('tx_')) {

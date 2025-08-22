@@ -191,6 +191,29 @@ const RPS = {
     return W[a].includes(b) ? 1 : -1;
   }
 };
+async function updateLobby(interaction, st) {
+  // danh sách tên người chơi
+  const names = st.players.map(u => `<@${u}>`).join('\n') || '(chưa có)';
+
+  // embed lobby
+  const embed = new EmbedBuilder()
+    .setColor(0x7c65ff)
+    .setTitle('🎮 RPSLS Tournament – Đăng ký')
+    .setDescription(`Slots: **${st.slots}** • Phí: **${st.fee.toLocaleString('vi-VN')}** • Thưởng: **${st.reward.toLocaleString('vi-VN')}**
+Nhấn **Tham gia** để vào giải.`)
+    .addFields({ name: 'Người chơi', value: names })
+    .setFooter({ text: `TID: ${st.tid}` });
+
+  try {
+    // lấy channel & message đã post lobby
+    const ch  = await interaction.client.channels.fetch(st.channelId);
+    const msg = await ch.messages.fetch(st.msgLobbyId);
+
+    await msg.edit({ embeds: [embed], components: lobbyButtons(st.tid) });
+  } catch (e) {
+    console.error('[RPSLS] updateLobby failed:', e);
+  }
+}
 
 // === TikTok auto settings (JSON) ===
 const TIKTOK_SETTINGS_FILE = path.join(process.cwd(), "tiktok-settings.json");
@@ -1633,6 +1656,7 @@ if (interaction.commandName === 'rpsls') {
 
     await interaction.reply({ embeds:[embed], components: lobbyButtons(tid) });
 const msg = await interaction.fetchReply();
+    st.channelId = interaction.channelId;
 state.msgLobbyId = msg.id;      // lưu id để các nút JOIN/LEAVE/START update được
     return;
   }

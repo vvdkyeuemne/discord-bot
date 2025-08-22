@@ -912,32 +912,31 @@ const sendnotiTemp = new Map();
 
  // ----- Buttons handler (một listener duy nhất) -----
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Guard cho button
+  const isBtn = typeof interaction.isButton === 'function' && interaction.isButton();
+  const id = isBtn ? String(interaction.customId || '') : '';
+  
+  // ===== TÀI XỈU =====
+if (isBtn && id.startsWith('tx_')) {
+  const parts = id.split('_');              // ["tx","bet|dealer","<roundId>"] hoặc ["tx","bet","tai|xiu","<roundId>"]
+  const action = parts[1];
+  const roundId = action === 'bet' ? parts[3] : parts[2];
+  const s = taiXiuState.get(interaction.guildId);
 
-  // ===== TÀI XỈU: buttons (KHÔNG dùng try ở đây) =====
-  if (interaction.isButton() && interaction.customId.startsWith('tx_')) {
-    const id = String(interaction.customId || '');
-    const parts = id.split('_');            // ["tx","bet|dealer","<roundId>"]
-    const action  = parts[1];
-    const roundId = parts[2];
+  if (!s || String(s.roundId) !== String(roundId)) {
+    await interaction.reply({ content:'⚠️ Phiên đã kết thúc hoặc không tồn tại.', ephemeral:true });
+    return;
+  }
+  if (s.locked) {
+    await interaction.reply({ content:'⛔ Đã khoá đặt cược, vui lòng chờ kết quả!', ephemeral:true });
+    return;
+  }
 
-    const s = taiXiuState.get(interaction.guildId);
-    if (!s || String(s.roundId) !== String(roundId)) {
-      await interaction.reply({ content: '⚠️ Phiên đã kết thúc hoặc không tồn tại.', ephemeral: true });
-      return;
-    }
-    if (s.locked) {
-      await interaction.reply({ content: '🛑 Đã khoá đặt cược, vui lòng chờ kết quả!', ephemeral: true });
-      return;
-    }
-
-    if (action === 'dealer') {
-      s.dealerId = interaction.user.id;
-      await interaction.update({
-        embeds: [TX.render(interaction.guildId)],
-        components: [TX.row(s.roundId)],
-      });
-      return;
-    }
+  if (action === 'dealer') {
+    s.dealerId = interaction.user.id;
+    await interaction.update({ embeds:[TX.render(interaction.guildId)], components:[TX.row(s.roundId)] });
+    return;
+  }
 
     if (action === 'bet') {
       const modal = new ModalBuilder()
@@ -957,7 +956,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
   }
-      if (interaction.customId === 'meme_refresh') {
+       if (isBtn && id === 'meme_refresh') {
         await interaction.deferUpdate();
         try {
           const { data } = await axios.get('https://meme-api.com/gimme');
@@ -973,14 +972,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           )
           .setColor(0x5865F2);
           await interaction.followUp({ embeds:[embed], components:[row] });
-        // ===== RPSLS: buttons (CÓ try/catch riêng) =====
-  if (interaction.isButton() && interaction.customId.startsWith('rps_')) {
-    try {
-      const id  = String(interaction.customId || '');
-      const gid = interaction.guildId;
-      const st  = rpslsState.get(gid);
-      if (!st) { await interaction.reply({ content: '⚠️ Không có giải.', ephemeral: true }); return; }
-
+          
+// ===== RPSLS buttons =====
+  if (isBtn && id.startsWith('rps_')) {
+    const gid = interaction.guildId;
+    const st = rpslsState.get(gid);
+    if (!st) { await interaction.reply({ content: '⚠️ Không có giải.', ephemeral: true }); return; }
       if (id.startsWith('rps_join_')) {
         if (st.started) { await interaction.reply({ content: 'Đã bắt đầu.', ephemeral: true }); return; }
         if (st.players.includes(interaction.user.id)) { await interaction.reply({ content: 'Bạn đã tham gia.', ephemeral: true }); return; }
@@ -1041,11 +1038,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return; // chặn rơi xuống các handler khác
   }
 
-      // ===== Button: trả lời quiz =====
-      if (interaction.customId.startsWith('quiz_ans_')) {
-        const parts = interaction.customId.split('_'); // ["quiz","ans","<interactionId>","<idx>"]
-        const quizKey = parts[2];
-        const idxStr = parts[3];
+      // ===== Quiz: trả lời =====
+if (isBtn && id.startsWith('quiz_ans_')) {
+  const parts = id.split('_');                // ["quiz","ans","<interactionId>","<idx>"]
+  const quizKey = parts[2];
+  const idxStr  = parts[3];
         if (!global.quizStore) global.quizStore = new Map();
         const data = global.quizStore.get(quizKey);
         if (!data) {
@@ -1083,84 +1080,96 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      // sendnoti confirm
-      if (interaction.customId.startsWith('sendnoti_confirm|')) {
-        const [, authorId, scope, mention] = interaction.customId.split('|');
-        if (interaction.user.id !== authorId) return interaction.reply({ content:'⛔ Chỉ người tạo thông báo mới bấm được.', ephemeral:true });
+      // ===== sendnoti: xác nhận / huỷ =====
+if (isBtn && id.startsWith('sendnoti_confirm|')) {
+  const [, authorId, scope, mention] = id.split('|');
+  if (interaction.user.id !== authorId) {
+    return interaction.reply({ content: '🚫 Chỉ người tạo thông báo mới bấm được.', ephemeral: true });
+  }
 
-        const cache = sendnotiTemp.get(authorId);
-        if (!cache) return interaction.reply({ content:'⚠️ Hết hạn xác nhận. Dùng lại /sendnoti.', ephemeral:true });
+  const cache = sendnotiTemp.get(authorId);
+  if (!cache) {
+    return interaction.reply({ content: '⚠️ Hết hạn xác nhận. Dùng lại /sendnoti.', ephemeral: true });
+  }
 
-        const { title, content, imageUrl } = cache;
-        const targets = (scope === 'all')
-          ? client.guilds.cache
-          : client.guilds.cache.filter(g => g.id === interaction.guildId);
+  const { title, content, imageUrl } = cache;
+  const targets = (scope === 'all')
+    ? client.guilds.cache
+    : client.guilds.cache.filter(g => g.id === interaction.guildId);
 
-        let ok=0, fail=0;
-        for (const g of targets.values()) {
-          const ch = g.systemChannel
-            || g.channels.cache.find(c => c.type===ChannelType.GuildText && c.viewable && c.permissionsFor(g.members.me).has(PermissionsBitField.Flags.SendMessages));
-          if (!ch) { fail++; continue; }
+  let ok = 0, fail = 0;
+  for (const g of targets.values()) {
+    const ch = g.systemChannel || g.channels.cache.find(c => c.type===ChannelType.GuildText && c.viewable && c.permissionsFor(g.members.me).has('SendMessages'));
+    if (!ch) { fail++; continue; }
+    try {
+      const embed = new EmbedBuilder()
+        .setTitle(title || '📢 Thông báo toàn server')
+        .setDescription(content)
+        .setColor(0xF1c40F)
+        .setFooter({ text: `Gửi bởi ${interaction.user.tag}` })
+        .setTimestamp();
+      if (imageUrl) embed.setImage(imageUrl);
 
-          try {
-            const embed = new EmbedBuilder()
-              .setTitle(title || '📢 Thông báo toàn server')
-              .setDescription(content)
-              .setColor(0xF1C40F)
-              .setFooter({ text:`Gửi bởi ${interaction.user.tag}` })
-              .setTimestamp();
-            if (imageUrl) embed.setImage(imageUrl);
+      const pingText = mention==='everyone' ? '@everyone' : (mention==='here' ? '@here' : '');
+      await ch.send({ content: pingText || undefined, embeds: [embed] });
+      ok++;
+    } catch { fail++; }
+  }
 
-            const pingText = mention==='everyone' ? '@everyone' : (mention==='here' ? '@here' : '');
-            await ch.send({ content: pingText || undefined, embeds:[embed] });
-            ok++;
-          } catch { fail++; }
-        }
-        sendnotiTemp.delete(authorId);
-        return interaction.update({ content:`✅ Đã gửi xong.\n• Thành công: **${ok}** server\n• Thất bại: **${fail}** server`, components:[] });
-      }
-      if (interaction.customId.startsWith('sendnoti_cancel|')) {
-        sendnotiTemp.delete(interaction.user.id);
-        return interaction.update({ content:'❎ Đã huỷ gửi.', components:[] });
-      }
+  sendnotiTemp.delete(authorId);
+  return interaction.update({ content: `✅ Đã gửi xong.\n• Thành công: **${ok}** server\n• Thất bại: **${fail}**`, components: [] });
+}
+
+if (isBtn && id.startsWith('sendnoti_cancel|')) {
+  sendnotiTemp.delete(interaction.user.id);
+  return interaction.update({ content: '🛑 Đã hủy gửi.', components: [] });
+}
 
       // Phân trang SoundCloud
-      if (interaction.customId.startsWith('sc_page|')) {
-        try {
-          const [, authorId, nonce, pageStr] = interaction.customId.split('|');
-          if (interaction.user.id !== authorId) {
-            return interaction.reply({ content:'⛔ Chỉ người yêu cầu mới dùng được bộ phân trang này.', ephemeral:true });
-          }
-          const page = parseInt(pageStr, 10) || 0;
-          const view = await renderSCPage(nonce, page);
-          return interaction.update(view);
-        } catch (e) {
-          console.error('SC pager error:', e);
-          try { return interaction.reply({ content:'⚠️ Không chuyển trang được (kết quả có thể đã hết hạn).', ephemeral:true }); } catch {}
-        }
-        return;
-      }
+if (isBtn && id.startsWith('sc_page|')) {
+  try {
+    const [, authorId, nonce, pageStr] = id.split('|');
+    if (interaction.user.id !== authorId) {
+      return interaction.reply({ content: '🚫 Chỉ người yêu cầu mới dùng được bộ phân trang này.', ephemeral: true });
+    }
 
-    
-      // ship reroll
-      if (interaction.customId.startsWith('ship_reroll|')) {
-        await interaction.deferUpdate();
-        try {
-        const [, aId, bId] = interaction.customId.split('|');
-        const a = await interaction.guild.members.fetch(aId).catch(()=>null);
-        const b = await interaction.guild.members.fetch(bId).catch(()=>null);
-        if (!a || !b) return interaction.followUp({ content:'⚠️ Không tìm thấy thành viên!', ephemeral:true });
+    const page = parseInt(pageStr, 10) || 0;
+    const view = await renderSCPage(nonce, page);
+    return interaction.update(view);
+  } catch (e) {
+    console.error('SC pager error:', e);
+    try {
+      return interaction.reply({ content: '⚠️ Không chuyển trang được (kết quả có thể đã hết hạn).', ephemeral: true });
+    } catch {}
+  }
+  return;
+}
 
-        const percent = Math.floor(Math.random()*101);
-        const file = await makeShipCard(a, b, percent);
-        const embed = new EmbedBuilder()
-          .setTitle(loveEmoji(percent) + ' Match Meter: ' + percent + '%')
-          .setDescription('**' + a.toString() + '** ❤️ **' + b.toString() + '**')
-          .setImage('attachment://ship.png')
-          .setColor(0xff66aa);
-        const cid = 'ship_reroll|' + a.id + '|' + b.id;
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(cid).setLabel('🔁 Reroll').setStyle(ButtonStyle.Primary));
-        await interaction.followUp({ embeds:[embed], files:[file], components:[row] });
+    // ===== ship reroll =====
+if (isBtn && id.startsWith('ship_reroll|')) {
+  await interaction.deferUpdate();
+  try {
+    const [, aId, bId] = id.split('|');
+    const a = await interaction.guild.members.fetch(aId).catch(() => null);
+    const b = await interaction.guild.members.fetch(bId).catch(() => null);
+    if (!a || !b) {
+      return interaction.followUp({ content: '⚠️ Không tìm thấy thành viên!', ephemeral: true });
+    }
+
+    const percent = Math.floor(Math.random() * 101);
+    const file    = await makeShipCard(a, b, percent);
+    const embed   = new EmbedBuilder()
+      .setTitle(`${loveEmoji(percent)}  Match Meter:  ${percent}%`)
+      .setDescription(`**${a.toString()}** ♥ **${b.toString()}**`)
+      .setImage('attachment://ship.png')
+      .setColor(0xff66aa);
+
+    const cid = `ship_reroll|${a.id}|${b.id}`;
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(cid).setLabel('🔁 Reroll').setStyle(ButtonStyle.Primary)
+    );
+
+    await interaction.followUp({ embeds: [embed], files: [file], components: [row] });
         return;
 } catch (e) {
       console.error('Button handler error:', e);

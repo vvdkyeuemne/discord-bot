@@ -1684,27 +1684,62 @@ try {
     components: [ TX.rowDisabled(s.roundId) ]
   });
 
-  // rolling animation as new message (~3s)
-  const rolling = new EmbedBuilder()
-    .setTitle('🎲 Đang lắc xúc xắc...')
-    .setDescription('⏳ Vui lòng đợi...')
-    .setColor(0x00bfff)
-    .setFooter({ text: `Phiên #${s.roundId} • ${TX.now()}` });
-  const rollMsg = await ch.send({ embeds: [rolling] });
+  // rolling animation as new message (sequential lock-in)
+const rollingTitle = '🎲 Đang lắc xúc xắc...';
+const baseColor    = 0x00bfff;
 
-  for (let i = 0; i < 4; i++) {
-    const d = [1,2,3].map(() => 1 + Math.floor(Math.random()*6));
-    const frame = new EmbedBuilder()
-      .setTitle('🎲 Đang lắc xúc xắc...')
-      .setDescription(`${diceFace(d[0])} ${diceFace(d[1])} ${diceFace(d[2])}`)
-      .setColor(0x00bfff)
-      .setFooter({ text: `Phiên #${s.roundId} • ${TX.now()}` });
-    await rollMsg.edit({ embeds: [frame] });
-    await sleep(750);
-  }
+// helper: render 1–3 viên (null => ô trống)
+const renderRoll = (a, b, c) => {
+  const f = (n) => (n == null ? '▫️' : diceFace(n));
+  return new EmbedBuilder()
+    .setTitle(rollingTitle)
+    .setDescription(`${f(a)}  ${f(b)}  ${f(c)}`)
+    .setColor(baseColor)
+    .setFooter({ text: `Phiên #${s.roundId} • ${TX.now()}` });
+};
+
+// gửi khung đầu tiên
+let rollMsg = await ch.send({ embeds: [renderRoll(null, null, null)] });
+
+// “nặn” từng viên: đợt 1 → đợt 2 → đợt 3
+const spinOnce = () => 1 + Math.floor(Math.random() * 6);
+
+// Đợt 1
+for (let i = 0; i < 8; i++) {
+  await rollMsg.edit({ embeds: [renderRoll(spinOnce(), null, null)] });
+  await sleep(120);
+}
+const d1 = spinOnce();
+await rollMsg.edit({ embeds: [renderRoll(d1, null, null)] });
+await sleep(250);
+
+// Đợt 2
+for (let i = 0; i < 8; i++) {
+  await rollMsg.edit({ embeds: [renderRoll(d1, spinOnce(), null)] });
+  await sleep(120);
+}
+const d2 = spinOnce();
+await rollMsg.edit({ embeds: [renderRoll(d1, d2, null)] });
+await sleep(250);
+
+// Đợt 3
+for (let i = 0; i < 8; i++) {
+  await rollMsg.edit({ embeds: [renderRoll(d1, d2, spinOnce())] });
+  await sleep(120);
+}
+const d3 = spinOnce();
+await rollMsg.edit({ embeds: [renderRoll(d1, d2, d3)] });
+await sleep(350);
+
+// CHỐT kết quả
+const kq = {
+  dice: [d1, d2, d3],
+  sum:  d1 + d2 + d3,
+  triple: (d1 === d2 && d2 === d3),
+  side: (d1 === d2 && d2 === d3) ? 'house' : ((d1 + d2 + d3) >= 11 ? 'tai' : 'xiu'),
+};
 
   // official roll and payout
-  const kq = TX.roll();
   const winners = kq.side;
   const winnersList = [];
   const losersList = [];

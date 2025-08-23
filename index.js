@@ -3217,72 +3217,60 @@ if (interaction.commandName === 'fbauto') {
     return interaction.reply({ content: '✅ Đã bật auto Facebook cho **kênh này**.', ephemeral: true });
   }
 }
-// ====== /capcut ======
-if (interaction.commandName === 'capcut') {
-  await interaction.deferReply();
+// ========== handler capcut ==========
+  if (interaction.commandName === 'capcut') {
+  const url = interaction.options.getString('url', true);
+  await interaction.deferReply(); // công khai
 
   try {
-    const url = interaction.options.getString('url');
-
-    // Gọi API Downr để lấy dữ liệu CapCut
-    const res = await axios.post('https://downr.org/.netlify/functions/download', {
-      url: url
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'https://downr.org',
-        'Referer': 'https://downr.org/',
-        'User-Agent': 'Mozilla/5.0'
-      },
-      timeout: 20000
-    });
-
-    const data = res?.data;
-    if (!data || !data.medias) {
-      return interaction.editReply('⚠️ Không lấy được dữ liệu từ link CapCut.');
+    const { medias, meta } = await fetchCapcutViaDownr(url);
+    if (!medias?.length) {
+      return interaction.editReply('⚠️ Không lấy được media từ link CapCut.');
     }
 
-    // Lấy meta + media
-    const meta = {
-      title: data?.meta?.title || 'Không rõ tiêu đề',
-      author: data?.meta?.author || 'Ẩn danh'
-    };
+    const cap = (meta.caption || '').trim();
+    const capShort = cap.length > 800 ? cap.slice(0, 800) + '…' : cap;
 
-    const medias = data.medias || [];
-
-    if (!medias.length) {
-      return interaction.editReply('❌ Không tìm thấy file media nào trong link.');
-    }
-
-    // Embed trả kết quả
     const embed = new EmbedBuilder()
-      .setTitle(`📹 CapCut Download`)
-      .setDescription(`**${meta.title}**\n👤 Tác giả: ${meta.author}`)
-      .setColor(0x00ff99)
-      .setFooter({ text: `Yêu cầu bởi ${interaction.user.tag}` });
+      .setColor(0x00d084)
+      .setTitle(`✂️ CapCut: ${meta.title}`)
+      .setURL(meta.originalUrl)
+      .setDescription(
+        (meta.author ? `👤 Tác giả: **${meta.author}**\n` : '') +
+        (capShort ? `\n📖 ${capShort}` : '')
+      )
+      .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
+      .setTimestamp(new Date());
 
-    // Nếu có thumbnail
-    if (data.meta?.thumbnail) {
-      embed.setThumbnail(data.meta.thumbnail);
+    if (meta.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) {
+      embed.setImage(meta.thumbnail);
     }
 
-    // Gửi cùng file media (chỉ lấy cái đầu tiên)
-    const fileUrl = medias[0].url;
-    await interaction.editReply({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setLabel('Tải về')
-            .setStyle(ButtonStyle.Link)
-            .setURL(fileUrl)
-        )
-      ]
-    });
+    await interaction.editReply({ embeds: [embed] });
 
+    // Nút mở media
+    const top = medias.slice(0, 10);
+    const btns = top.map((m, i) =>
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel(`${/video/i.test(m.type) ? '🎬' : '🖼️'} Media ${i + 1}${m.quality ? ` • ${m.quality}` : ''}`)
+        .setURL(m.url)
+    );
+    btns.unshift(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl)
+    );
+    btns.push(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('🌐 Mở trên Downr').setURL(meta.downrPage)
+    );
+
+    const rows = [];
+    for (let i = 0; i < btns.length; i += 5) {
+      rows.push(new ActionRowBuilder().addComponents(...btns.slice(i, i + 5)));
+    }
+    if (rows.length) await interaction.followUp({ components: rows });
   } catch (e) {
-    console.error('[CapCut handler error]', e);
-    return interaction.editReply('❌ Có lỗi khi xử lý link CapCut.');
+    console.error('capcut error:', e);
+    return interaction.editReply('⚠️ Có lỗi xảy ra khi xử lý link CapCut.');
   }
 }
 });
@@ -4511,6 +4499,96 @@ client.on('messageCreate', async (msg) => {
     console.error('insta auto error:', e);
   }
 });
+// ========== Utils Capcut ==========
+/**
+ * Gọi endpoint downr để lấy danh sách media + meta từ CapCut
+ * Trả về: { medias: [{type, url, ext, quality}], meta: {thumbnail, caption, title, author, originalUrl, downrPage} }
+ */
+async function fetchCapcutViaDownr(rawUrl) {
+  let url = (rawUrl || '').trim();
+  try { url = decodeURIComponent(url); } catch {}
+  if (!/^https?:\/\//i.test(url)) return { medias: [], meta: {} };
+
+  const res = await axios.post(
+    'https://downr.org/.netlify/functions/download',
+    { url },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://downr.org',
+        'Referer': 'https://downr.org/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+        'Accept': 'application/json, text/html, */*',
+      },
+      timeout: 20000,
+      validateStatus: () => true,
+    }
+  );
+
+  let data = res?.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch {}
+  }
+
+  const medias = [];
+  const meta = {
+    thumbnail: data?.thumbnail || data?.thumb || data?.image || '',
+    caption:   data?.caption   || data?.description || data?.meta?.description || '',
+    title:     data?.title     || data?.meta?.title || 'CapCut Template',
+    author:    data?.author    || data?.uploader    || data?.meta?.author || '',
+    originalUrl: url,
+    downrPage: `https://downr.org/?u=${encodeURIComponent(url)}`
+  };
+
+  // gom các mảng media có thể có
+  const buckets = [
+    data?.media,
+    data?.links,
+    data?.data,
+  ].filter(Array.isArray);
+
+  for (const arr of buckets) {
+    for (const m of arr) {
+      const u =
+        m?.url || m?.download || m?.href || m?.src || m?.link || '';
+      if (!/^https?:\/\//i.test(u)) continue;
+
+      // đoán type
+      const lowerType = String(m?.type || '').toLowerCase();
+      let type =
+        lowerType.includes('video') || /\.mp4|\.mov|\.m4v/i.test(u)
+          ? 'video'
+          : (lowerType.includes('image') || /\.(jpe?g|png|webp|gif)$/i.test(u))
+          ? 'image'
+          : 'file';
+
+      const ext =
+        m?.ext ||
+        (type === 'image'
+          ? (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg')
+          : (/\.mp4/i.test(u) ? 'mp4' : ''));
+
+      const quality = m?.quality || m?.label || m?.resolution || '';
+
+      medias.push({ type, url: u, ext, quality });
+    }
+  }
+
+  // fallback: nếu Downr trả về 1 url đơn trong data.url
+  if (!medias.length && data?.url && /^https?:\/\//i.test(data.url)) {
+    const u = data.url;
+    const isVideo = /\.mp4|\.mov|\.m4v/i.test(u);
+    medias.push({
+      type: isVideo ? 'video' : 'image',
+      url: u,
+      ext: isVideo ? 'mp4' : (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg'),
+      quality: ''
+    });
+  }
+
+  return { medias, meta };
+}
 
 // ------------------ utils ------------------
 function fmtTime(sec) {

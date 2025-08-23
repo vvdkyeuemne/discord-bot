@@ -959,14 +959,6 @@ row(roundId) {
   );
 }, // <— BẮT BUỘC PHẢI CÓ DẤU PHẨY
 
-rowDisabled(roundId){
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`tx_lock_tai_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('Đặt TÀI').setDisabled(true),
-    new ButtonBuilder().setCustomId(`tx_lock_xiu_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('Đặt XỈU').setDisabled(true),
-    new ButtonBuilder().setCustomId(`tx_lock_dealer_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('Làm Cái').setDisabled(true),
-  );
-},
-  }
 function rpsButtons(tid, round){
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`rps_play_${tid}_${round}_rock`).setLabel('Đá').setEmoji('🪨').setStyle(ButtonStyle.Secondary),

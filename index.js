@@ -3217,29 +3217,30 @@ if (interaction.commandName === 'fbauto') {
     return interaction.reply({ content: '✅ Đã bật auto Facebook cho **kênh này**.', ephemeral: true });
   }
 }
-// ====== /capcut ======
+  // ====== /capcut ======
 if (interaction.commandName === 'capcut') {
   const url = interaction.options.getString('url', true);
-  await interaction.deferReply(); // công khai
+  await interaction.deferReply();
 
   try {
     const { medias, meta } = await fetchCapcutViaDownr(url);
-
     if (!medias?.length) {
       return interaction.editReply('⚠️ Không lấy được media từ link CapCut.');
     }
 
-    const cap = (meta.caption || '').trim();
-    const capShort = cap.length > 800 ? cap.slice(0, 800) + '…' : cap;
+    // Ưu tiên video
+    const pick =
+      medias.find(m => /capcutvod\.com/i.test(m.url)) ||
+      medias.find(m => /mime_type=video/i.test(m.url)) ||
+      medias.find(m => /video/i.test(m.type)) ||
+      medias[0];
 
+    // Embed thông tin
     const embed = new EmbedBuilder()
       .setColor(0x00d084)
-      .setTitle(`✂️ CapCut: ${meta.title}`)
-      .setURL(meta.originalUrl)
-      .setDescription(
-        (meta.author ? `👤 Tác giả: **${meta.author}**\n` : '') +
-        (capShort ? `\n📖 ${capShort}` : '')
-      )
+      .setTitle(`✂️ CapCut: ${meta.title || 'Template'}`)
+      .setURL(meta.originalUrl || url)
+      .setDescription(meta.author ? `👤 Tác giả: **${meta.author}**` : '')
       .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
       .setTimestamp(new Date());
 
@@ -3249,67 +3250,23 @@ if (interaction.commandName === 'capcut') {
 
     await interaction.editReply({ embeds: [embed] });
 
-    // ===== Chọn & gửi media =====
-    let video = medias.find(m => /video/i.test(m.type)) || null;
+    // Gửi media
+    await interaction.followUp({ content: pick.url });
 
-    // Nếu chưa chắc là video, HEAD để kiểm tra content-type
-    if (!video) {
-      for (const m of medias.slice(0, 5)) {
-        try {
-          const head = await axios.head(m.url, { timeout: 8000, validateStatus: () => true });
-          const ctype = String(head.headers['content-type'] || '').toLowerCase();
-          if (ctype.startsWith('video/')) { video = m; break; }
-        } catch {}
-      }
-    }
+    // Nút “Dùng template”
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel('✂️ Dùng template')
+        .setURL(meta.originalUrl || url)
+    );
+    await interaction.followUp({ components: [row] });
 
-    const image  = medias.find(m => /image/i.test(m.type));
-    const target = video || image || medias[0];
-    const fileUrl = target?.url;
-
-    if (!fileUrl) {
-      await interaction.followUp('⚠️ Không tìm thấy URL media hợp lệ.');
-    } else {
-      // thử lấy size
-      let size = 0;
-      try {
-        const head = await axios.head(fileUrl, { timeout: 8000, validateStatus: () => true });
-        size = Number(head.headers['content-length'] || 0);
-      } catch {}
-
-      const limit = 25 * 1024 * 1024; // ~25MB
-      let sent = false;
-
-      if (size > 0 && size < limit) {
-        try {
-          const resp = await axios.get(fileUrl, { responseType: 'arraybuffer', timeout: 30000 });
-          const ext = target.ext || (video ? 'mp4' : (image ? 'jpg' : 'bin'));
-          const attachment = new AttachmentBuilder(resp.data, { name: `capcut.${ext}` });
-          await interaction.followUp({ files: [attachment] });
-          sent = true;
-        } catch (e) {
-          console.error('[CapCut] download/send failed:', e);
-        }
-      }
-
-      if (!sent) {
-        const label = video ? '📹 Tải video' : (image ? '🖼️ Tải ảnh' : '📦 Tải media');
-        await interaction.followUp({ content: `${label}: ${fileUrl}` });
-      }
-    }
-
-    // Chỉ giữ 1 nút "Dùng template"
-    if (meta.originalUrl) {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(meta.originalUrl).setLabel('✂️ Dùng template')
-      );
-      await interaction.followUp({ components: [row] });
-    }
   } catch (e) {
-    console.error('capcut error:', e);
-    return interaction.editReply('⚠️ Có lỗi xảy ra khi xử lý link CapCut.');
+    console.error('[CapCut handler error]', e);
+    return interaction.editReply('❌ Có lỗi khi xử lý link CapCut.');
   }
-} 
+}
 });
 
 // ------------------- misc helpers -------------------
@@ -4538,7 +4495,7 @@ client.on('messageCreate', async (msg) => {
 });
 // ========== Utils Capcut ==========
 /**
- * Lấy danh sách media + meta cho link CapCut qua Downr
+ * Lấy media + meta cho link CapCut qua Downr
  * Trả về: { medias:[{type:'video'|'image'|'file', url, ext, quality}], meta:{...} }
  */
 async function fetchCapcutViaDownr(rawUrl) {
@@ -4546,140 +4503,88 @@ async function fetchCapcutViaDownr(rawUrl) {
   try { url = decodeURIComponent(url); } catch {}
   if (!/^https?:\/\//i.test(url)) return { medias: [], meta: {} };
 
-  const UA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36';
-
-  // --- 1) Downr POST (chính) ---
-  let data = null;
-  try {
-    const res = await axios.post(
-      'https://downr.org/.netlify/functions/download',
-      { url },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Origin': 'https://downr.org',
-          'Referer': 'https://downr.org/',
-          'User-Agent': UA,
-          'Accept': 'application/json, text/html, */*',
-        },
-        timeout: 20000,
-        validateStatus: () => true,
-      }
-    );
-    data = res?.data;
-    if (typeof data === 'string') { try { data = JSON.parse(data); } catch {} }
-    console.log('[CapCut][POST] status:', res?.status, 'keys:', data && Object.keys(data));
-  } catch (e) {
-    console.error('[CapCut][POST] error:', e?.message);
-  }
-
-  // --- 2) Nếu POST không ra gì, thử Downr GET (?url=) ---
-  if (!data || (!data.medias && !data.media && !data.links && !data.data)) {
-    try {
-      const res2 = await axios.get(
-        'https://downr.org/.netlify/functions/download',
-        {
-          params: { url },
-          headers: {
-            'User-Agent': UA,
-            'Accept': 'application/json, text/html, */*',
-            'Origin': 'https://downr.org',
-            'Referer': 'https://downr.org/',
-          },
-          timeout: 20000,
-          validateStatus: () => true,
-        }
-      );
-      let d2 = res2?.data;
-      if (typeof d2 === 'string') { try { d2 = JSON.parse(d2); } catch {} }
-      console.log('[CapCut][GET] status:', res2?.status, 'keys:', d2 && Object.keys(d2));
-      // Nếu GET có dữ liệu dùng tạm
-      if (d2 && (d2.medias || d2.media || d2.links || d2.data || d2.url)) data = d2;
-    } catch (e) {
-      console.error('[CapCut][GET] error:', e?.message);
+  // 1) gọi Downr API
+  const res = await axios.post(
+    'https://downr.org/.netlify/functions/download',
+    { url },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://downr.org',
+        'Referer': 'https://downr.org/',
+        'User-Agent': 'Mozilla/5.0'
+      },
+      timeout: 20000,
+      validateStatus: () => true
     }
-  }
+  );
 
-  const metas = [];
+  let data = res?.data;
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch {} }
+
   const medias = [];
-
-  // meta cơ bản
   const meta = {
-    thumbnail: data?.thumbnail || data?.thumb || data?.image || '',
-    caption:   data?.caption   || data?.description || data?.meta?.description || '',
-    title:     data?.title     || data?.meta?.title || 'CapCut Template',
-    author:    data?.author    || data?.uploader    || data?.meta?.author || '',
+    thumbnail:   data?.thumbnail || data?.thumb || data?.image || '',
+    caption:     data?.caption   || data?.description || data?.meta?.description || '',
+    title:       data?.title     || data?.meta?.title || 'CapCut Template',
+    author:      data?.author    || data?.uploader    || data?.meta?.author || '',
     originalUrl: url,
-    downrPage: `https://downr.org/?u=${encodeURIComponent(url)}`
+    downrPage:   `https://downr.org/?u=${encodeURIComponent(url)}`
   };
 
-  // --- 3) Gộp bucket từ JSON ---
-  const buckets = [
-    data?.medias,   // format “chuẩn”
-    data?.media,
-    data?.links,
-    data?.data,
-  ].filter(Array.isArray);
-
+  // gom các mảng media có thể có
+  const buckets = [data?.medias, data?.media, data?.links, data?.data].filter(Array.isArray);
   for (const arr of buckets) {
     for (const m of arr) {
       const u = m?.url || m?.download || m?.href || m?.src || m?.link || '';
       if (!/^https?:\/\//i.test(u)) continue;
 
-      const lowerType = String(m?.type || '').toLowerCase();
-      const isVid = lowerType.includes('video') || /\.mp4|\.mov|\.m4v/i.test(u) || /mime_type=video/i.test(u) || /capcutvod\.com/i.test(u);
+      const lower = String(m?.type || '').toLowerCase();
+      const isVid = lower.includes('video') || /\.mp4|\.mov|\.m4v/i.test(u) || /mime_type=video/i.test(u);
+      const isImg = lower.includes('image') || /\.(jpe?g|png|webp|gif)$/i.test(u);
 
-      const type = isVid
-        ? 'video'
-        : (lowerType.includes('image') || /\.(jpe?g|png|webp|gif)$/i.test(u))
-        ? 'image'
-        : 'file';
-
-      const ext =
-        m?.ext ||
-        (type === 'image'
-          ? (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg')
-          : (/\.mp4/i.test(u) ? 'mp4' : ''));
-
-      const quality = m?.quality || m?.label || m?.resolution || '';
-
-      medias.push({ type, url: u, ext, quality });
+      medias.push({
+        type: isVid ? 'video' : isImg ? 'image' : 'file',
+        url: u,
+        ext:  m?.ext || (isVid ? 'mp4' : (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg')),
+        quality: m?.quality || m?.label || m?.resolution || ''
+      });
     }
   }
 
-  // --- 4) Nếu vẫn chưa có video thực, thử scrape trang Downr ---
-  const onlyCapcutLink = medias.length && medias.every(m => /capcut\.com/i.test(m.url));
-  if (!medias.length || onlyCapcutLink) {
+  // 2) nếu chưa có file thực → scrape trang Downr, lọc candidate, HEAD phân loại
+  const onlyCapcutLinks = medias.length && medias.every(m => /capcut\.com/i.test(m.url));
+  if (!medias.length || onlyCapcutLinks) {
     try {
       const html = (await axios.get(meta.downrPage, {
-        headers: { 'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html,application/xhtml+xml,*/*' },
         timeout: 20000, validateStatus: () => true
-      }))?.data || '';
+      })).data || '';
 
-      // bắt mọi URL trong HTML/JS/JSON
+      // bắt mọi URL trong trang
       const urlSet = new Set();
-      const rxAnyUrl = /(https?:\/\/[^\s"'<>)]+)(?=["')\s]|$)/gi;
-      let mm; while ((mm = rxAnyUrl.exec(html)) !== null) {
-        const u = (mm[1] || '').trim();
+      const rxAnyUrl = /(https?:\/\/[^\s"'<>)]+)(?=[\s"'<>)]|$)/gi;
+      let m;
+      while ((m = rxAnyUrl.exec(html)) !== null) {
+        const u = (m[1] || '').trim();
         if (/^https?:\/\//i.test(u)) urlSet.add(u);
       }
       const urls = Array.from(urlSet);
 
-      // Ưu tiên: capcutvod, mime_type=video, CDN phổ biến
+      // ưu tiên capcutvod, mime_type=video, CDN phổ biến, đuôi media
       const candidates = urls
         .filter(u =>
           /capcutvod\.com/i.test(u) ||
-          /\?(?:[^&]*?)mime_type=video/i.test(u) ||
+          /(?:\?|&)mime_type=video/i.test(u) ||
           /(downr|netlify|cdn|amazonaws|cloudfront|googlevideo|akamai)/i.test(u) ||
-          /\.(mp4|m3u8|jpg|jpeg|png|webp)(\?|$)/i.test(u)
+          /\.(mp4|m3u8|jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(u)
         )
         .slice(0, 80);
 
-      // HEAD phân loại – nếu không HEAD được mà link đoán là video => nhận luôn
       for (const u of candidates) {
-        const hintVideo = /capcutvod\.com/i.test(u) || /\?(?:[^&]*?)mime_type=video/i.test(u);
         let ctype = '';
+        const hintVideo = /capcutvod\.com/i.test(u) || /(?:\?|&)mime_type=video/i.test(u);
+
         try {
           const head = await axios.head(u, { timeout: 8000, maxRedirects: 5, validateStatus: () => true });
           ctype = String(head.headers['content-type'] || '').toLowerCase();
@@ -4695,27 +4600,21 @@ async function fetchCapcutViaDownr(rawUrl) {
           medias.push({ type: 'video', url: u, ext: 'mp4', quality: '' });
           if (medias.filter(x => x.type === 'video').length >= 2) break;
         } else if (ctype.startsWith('image/')) {
-          const ext = /\.(webp|png|jpe?g|gif)/i.exec(ctype)?.[1] || 'jpg';
+          const ext = (/\.(webp|png|jpe?g|gif)\b/i.exec(u)?.[1] || 'jpg');
           medias.push({ type: 'image', url: u, ext, quality: '' });
         }
       }
-    } catch (e) {
-      console.error('[CapCut] scrape fallback failed:', e?.message);
-    }
+    } catch {}
   }
 
-  // Debug xem kết quả bắt được
-  console.log('[CapCut] medias (first 3):',
-    medias.slice(0,3).map(m => ({ type: m.type, url: m.url.slice(0, 120) })));
-
-  // --- 5) Fallback cuối: nếu Downr trả về 1 url đơn ---
+  // 3) fallback cuối: nếu Downr trả về 1 URL đơn
   if (!medias.length && data?.url && /^https?:\/\//i.test(data.url)) {
     const u = data.url;
-    const isVideo = /\.mp4|\.mov|\.m4v/i.test(u) || /mime_type=video/i.test(u);
+    const isVideo = /\.mp4|\.mov|\.m4v/i.test(u) || /(?:\?|&)mime_type=video/i.test(u);
     medias.push({
       type: isVideo ? 'video' : 'image',
       url: u,
-      ext: isVideo ? 'mp4' : (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg'),
+      ext:  isVideo ? 'mp4' : (/\.(jpe?g|png|webp|gif)$/i.exec(u)?.[1] || 'jpg'),
       quality: ''
     });
   }

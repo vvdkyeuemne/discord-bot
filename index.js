@@ -931,29 +931,26 @@ const TX = {
   },
   fmt(n){ return Number(n||0).toLocaleString('vi-VN'); },
   now(){ return new Date().toLocaleTimeString('vi-VN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); },
-  render(gid){
-    const s = taiXiuState.get(gid);
-    const left = Math.max(0, Math.ceil((s.endsAt - Date.now())/1000));
-    return new EmbedBuilder()
-      .setTitle('🎰 Tài Xỉu CLB – Mini Game')
-      .setColor(0x00bfff)
-      .setDescription(`⏰ **Còn lại:** **${left} giây**\n👑 **Người làm cái:** ${s.dealerId?`<@${s.dealerId}>`:'Chưa có'}\n⚠️ **Giới hạn:** ${TX.fmt(s.min)} – ${TX.fmt(s.max)} coin`)
-      const listTai = [...(s.bets?.values() || [])].filter(b => b?.side === 'tai');
-const listXiu = [...(s.bets?.values() || [])].filter(b => b?.side === 'xiu');
-const sum = arr => arr.reduce((a, b) => a + (Number(b?.amount) || 0), 0);
+ render(gid){
+  const s = taiXiuState.get(gid);
+  const left = Math.max(0, Math.ceil((s.endsAt - Date.now())/1000));
 
-.addFields(
-  { 
-    name:'🔵 Tài', 
-    value:`Người cược: **${listTai.length}**\nTổng: **${sum(listTai).toLocaleString('vi-VN')}**`, 
-    inline:false 
-  },
-  { 
-    name:'🔴 Xỉu', 
-    value:`Người cược: **${listXiu.length}**\nTổng: **${sum(listXiu).toLocaleString('vi-VN')}**`, 
-    inline:false 
-  },
-)
+  // TÍNH TOÁN TRƯỚC
+  const listTai = [...(s.bets?.values() || [])].filter(b => b.side === 'tai');
+  const listXiu = [...(s.bets?.values() || [])].filter(b => b.side === 'xiu');
+  const sum = arr => arr.reduce((a,b) => a + (Number(b.amount) || 0), 0);
+
+  // SAU ĐÓ MỚI TRẢ VỀ EMBED VÀ CHUỖI HÀNH ĐỘNG
+  return new EmbedBuilder()
+    .setTitle('🎲 Tài Xỉu CLB – Mini Game')
+    .setColor(0x00bfff)
+    .setDescription(`⏱️ **Còn lại:** **${left} giây**\n👑 **Người làm cái:** ${s.dealerId ? `<@${s.dealerId}>` : 'Chưa có'}\n⚠️ **Giới hạn:** ${s.min.toLocaleString('vi-VN')} – ${s.max.toLocaleString('vi-VN')} coin`)
+    .addFields(
+      { name:'🔵 Tài', value:`Người cược: **${listTai.length}**\nTổng: **${sum(listTai).toLocaleString('vi-VN')}**`, inline:false },
+      { name:'🔴 Xỉu', value:`Người cược: **${listXiu.length}**\nTổng: **${sum(listXiu).toLocaleString('vi-VN')}**`, inline:false },
+    )
+    .setFooter({ text:`Phiên #${s.roundId} • ${TX.now()}` });
+}
 row(roundId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`tx_bet_tai_${roundId}`).setStyle(ButtonStyle.Primary).setLabel('💙 Đặt TÀI'),

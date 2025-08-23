@@ -917,47 +917,67 @@ client.once(Events.ClientReady, async () => {
   await loadBadges().catch(()=>{});
 });
 
-
-// ====== TÀI XỈU: state theo guild + helpers ======
+// ====== TÀI XỈU: state theo guild + helpers =====
 const taiXiuState = new Map(); // guildId -> state
 
 const TX = {
+  // gieo 3 xúc xắc
   roll() {
-    const d = [1,2,3].map(()=>1+Math.floor(Math.random()*6));
-    const sum = d[0]+d[1]+d[2];
-    const triple = (d[0]===d[1] && d[1]===d[2]);
+    const d = [1,2,3].map(() => 1 + Math.floor(Math.random() * 6));
+    const sum = d[0] + d[1] + d[2];
+    const triple = (d[0] === d[1] && d[1] === d[2]);
     const side = triple ? 'house' : (sum >= 11 ? 'tai' : 'xiu');
-    return { dice:d, sum, triple, side };
+    return { dice: d, sum, triple, side };
   },
-  fmt(n){ return Number(n||0).toLocaleString('vi-VN'); },
-  now(){ return new Date().toLocaleTimeString('vi-VN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); },
- render(gid){
-  const s = taiXiuState.get(gid);
-  const left = Math.max(0, Math.ceil((s.endsAt - Date.now())/1000));
 
-  // TÍNH TOÁN TRƯỚC
-  const listTai = [...(s.bets?.values() || [])].filter(b => b.side === 'tai');
-  const listXiu = [...(s.bets?.values() || [])].filter(b => b.side === 'xiu');
-  const sum = arr => arr.reduce((a,b) => a + (Number(b.amount) || 0), 0);
+  // định dạng số VN
+  fmt(n) { return Number(n || 0).toLocaleString('vi-VN'); },
 
-  // SAU ĐÓ MỚI TRẢ VỀ EMBED VÀ CHUỖI HÀNH ĐỘNG
-  return new EmbedBuilder()
-    .setTitle('🎲 Tài Xỉu CLB – Mini Game')
-    .setColor(0x00bfff)
-    .setDescription(`⏱️ **Còn lại:** **${left} giây**\n👑 **Người làm cái:** ${s.dealerId ? `<@${s.dealerId}>` : 'Chưa có'}\n⚠️ **Giới hạn:** ${s.min.toLocaleString('vi-VN')} – ${s.max.toLocaleString('vi-VN')} coin`)
-    .addFields(
-      { name:'🔵 Tài', value:`Người cược: **${listTai.length}**\nTổng: **${sum(listTai).toLocaleString('vi-VN')}**`, inline:false },
-      { name:'🔴 Xỉu', value:`Người cược: **${listXiu.length}**\nTổng: **${sum(listXiu).toLocaleString('vi-VN')}**`, inline:false },
-    )
-    .setFooter({ text:`Phiên #${s.roundId} • ${TX.now()}` });
-},
-row(roundId) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`tx_bet_tai_${roundId}`).setStyle(ButtonStyle.Primary).setLabel('💙 Đặt TÀI'),
-    new ButtonBuilder().setCustomId(`tx_bet_xiu_${roundId}`).setStyle(ButtonStyle.Danger).setLabel('❤️ Đặt XỈU'),
-    new ButtonBuilder().setCustomId(`tx_dealer_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('👑 Làm Cái'),
-  );
-}, // <— BẮT BUỘC PHẢI CÓ DẤU PHẨY
+  // thời gian HH:mm:ss
+  now() { 
+    return new Date().toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }); 
+  },
+
+  // render Embed chính của phiên
+  render(gid) {
+    const s = taiXiuState.get(gid);
+    const left = Math.max(0, Math.ceil((s.endsAt - Date.now()) / 1000));
+
+    // chuẩn bị dữ liệu
+    const listTai = [...(s.bets?.values() ?? [])].filter(b => b.side === 'tai');
+    const listXiu = [...(s.bets?.values() ?? [])].filter(b => b.side === 'xiu');
+    const sum = arr => arr.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+
+    // trả về Embed
+    return new EmbedBuilder()
+      .setTitle('🎲 Tài Xỉu CLB – Mini Game')
+      .setColor(0x00bfff)
+      .setDescription(`⏱️ **Còn lại:** **${left}** giây\n👑 **Người làm cái:** ${s.dealerId ? `<@${s.dealerId}>` : 'Chưa có'}`)
+      .addFields(
+        { name: '🔵 Tài', value: `Người cược: **${listTai.length}**\nTổng: **${this.fmt(sum(listTai))}** coin`, inline: false },
+        { name: '🔴 Xỉu', value: `Người cược: **${listXiu.length}**\nTổng: **${this.fmt(sum(listXiu))}** coin`, inline: false },
+      )
+      .setFooter({ text: `Phiên #${s.roundId} • ${this.now()}` });
+  },
+
+  // hàng nút khi đang mở cược
+  row(roundId) {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`tx_bet_tai_${roundId}`).setStyle(ButtonStyle.Primary).setLabel('💙 Đặt TÀI'),
+      new ButtonBuilder().setCustomId(`tx_bet_xiu_${roundId}`).setStyle(ButtonStyle.Danger ).setLabel('❤️ Đặt XỈU'),
+      new ButtonBuilder().setCustomId(`tx_dealer_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('👑 Làm Cái'),
+    );
+  },
+
+  // hàng nút khi đã khoá cược (hiện chữ “🔒 …”)
+  rowDisabled(roundId) {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`tx_lock_tai_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('🔒 Đặt Tài'),
+      new ButtonBuilder().setCustomId(`tx_lock_xiu_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('🔒 Đặt Xỉu'),
+      new ButtonBuilder().setCustomId(`tx_lock_dealer_${roundId}`).setStyle(ButtonStyle.Secondary).setLabel('🔒 Làm Cái'),
+    );
+  },
+};
 
 function rpsButtons(tid, round){
   const row = new ActionRowBuilder().addComponents(
@@ -1071,7 +1091,6 @@ if (interaction.isModalSubmit() && interaction.customId.startsWith('tx_modal_'))
 
   // Cập nhật message chính ngay lập tức
   try {
-    const ch = await interaction.client.channels.fetch(s.channelId);
     await ch.messages.edit(s.msgId, { embeds: [TX.render(gid)], components: [TX.row(s.roundId)] });
   } catch (e) {
     console.error('[TX] update after bet failed:', e);

@@ -3217,10 +3217,10 @@ if (interaction.commandName === 'fbauto') {
     return interaction.reply({ content: '✅ Đã bật auto Facebook cho **kênh này**.', ephemeral: true });
   }
 }
-// ========== handler capcut ==========
-  if (interaction.commandName === 'capcut') {
+// ====== /capcut ======
+if (interaction.commandName === 'capcut') {
   const url = interaction.options.getString('url', true);
-  await interaction.deferReply(); // công khai
+  await interaction.deferReply();
 
   try {
     const { medias, meta } = await fetchCapcutViaDownr(url);
@@ -3246,33 +3246,66 @@ if (interaction.commandName === 'fbauto') {
       embed.setImage(meta.thumbnail);
     }
 
+    // gửi embed trước
     await interaction.editReply({ embeds: [embed] });
 
-    // Nút mở media
-    const top = medias.slice(0, 10);
-    const btns = top.map((m, i) =>
-      new ButtonBuilder()
-        .setStyle(ButtonStyle.Link)
-        .setLabel(`${/video/i.test(m.type) ? '🎬' : '🖼️'} Media ${i + 1}${m.quality ? ` • ${m.quality}` : ''}`)
-        .setURL(m.url)
-    );
-    btns.unshift(
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl)
-    );
-    btns.push(
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('🌐 Mở trên Downr').setURL(meta.downrPage)
-    );
+    // Ưu tiên video; nếu không có thì dùng image/file đầu tiên
+    const video = medias.find(m => /video/i.test(m.type));
+    const image = medias.find(m => /image/i.test(m.type));
+    const target = video || image || medias[0];
+    const fileUrl = target?.url;
 
-    const rows = [];
-    for (let i = 0; i < btns.length; i += 5) {
-      rows.push(new ActionRowBuilder().addComponents(...btns.slice(i, i + 5)));
+    if (!fileUrl) {
+      await interaction.followUp('⚠️ Không tìm thấy URL media hợp lệ.');
+      return;
     }
-    if (rows.length) await interaction.followUp({ components: rows });
+
+    // Thử HEAD để lấy dung lượng
+    let size = 0;
+    try {
+      const head = await axios.head(fileUrl, { timeout: 10000 });
+      size = Number(head.headers['content-length'] || 0);
+    } catch (_) {
+      // có nơi chặn HEAD; bỏ qua, sẽ thử tải luôn bên dưới
+    }
+
+    const limit = 25 * 1024 * 1024; // 25MB
+    let sentAttachment = false;
+
+    // Nếu biết kích thước và nhỏ hơn limit -> tải và gửi file
+    if (size > 0 && size < limit) {
+      try {
+        const resp = await axios.get(fileUrl, { responseType: 'arraybuffer', timeout: 30000 });
+        const ext = target.ext || (video ? 'mp4' : 'jpg');
+        const attachment = new AttachmentBuilder(resp.data, { name: `capcut.${ext}` });
+        await interaction.followUp({ files: [attachment] });
+        sentAttachment = true;
+      } catch (e) {
+        console.error('[CapCut] download small file failed:', e);
+      }
+    }
+
+    // Nếu chưa gửi được file (file to hoặc HEAD không trả size) -> gửi link
+    if (!sentAttachment) {
+      const label = video ? '📹 Tải video' : (image ? '🖼️ Tải ảnh' : '📦 Tải media');
+      await interaction.followUp({ content: `${label}: ${fileUrl}` });
+    }
+
+    // Chỉ 1 nút: Dùng template (không còn các nút media/Downr)
+    if (meta.originalUrl) {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setURL(meta.originalUrl)
+          .setLabel('✂️ Dùng template')
+      );
+      await interaction.followUp({ components: [row] });
+    }
   } catch (e) {
     console.error('capcut error:', e);
     return interaction.editReply('⚠️ Có lỗi xảy ra khi xử lý link CapCut.');
   }
-}
+}  
 });
 
 // ------------------- misc helpers -------------------

@@ -3251,20 +3251,20 @@ if (interaction.commandName === 'capcut') {
     await interaction.editReply({ embeds: [embed] });
 
 // ==== GỬI VIDEO KHÔNG HIỆN LINK DÀI ====
-// Chọn video
-if (pick) {
+const chosen = pick || medias.find(m => /video/i.test(m.type)) || medias[0];
+if (chosen) {
   const safe = (s) => String(s || '')
     .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
     .slice(0, 40);
-  const fileName = `capcut_${safe(meta.title)}${pick.ext ? '.'+pick.ext : '.mp4'}`;
+  const fileName = `capcut_${safe(meta.title)}${chosen.ext ? '.'+chosen.ext : '.mp4'}`;
 
   try {
     await interaction.followUp({
-      files: [{ attachment: pick.url, name: fileName }]
+      files: [{ attachment: chosen.url, name: fileName }]
     });
   } catch (e) {
     try {
-      const resp = await axios.get(pick.url, {
+      const resp = await axios.get(chosen.url, {
         responseType: 'arraybuffer',
         timeout: 20000,
         headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -3274,14 +3274,8 @@ if (pick) {
       const LIMIT = 25 * 1024 * 1024; // 25MB
       if (buf.length > LIMIT) {
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setStyle(ButtonStyle.Link)
-            .setLabel('⬇️ Tải video')
-            .setURL(pick.url),
-          new ButtonBuilder()
-            .setStyle(ButtonStyle.Link)
-            .setLabel('✂️ Dùng template')
-            .setURL(meta.originalUrl || url)
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
         );
         await interaction.followUp({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
       } else {
@@ -3291,14 +3285,8 @@ if (pick) {
       }
     } catch {
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setStyle(ButtonStyle.Link)
-          .setLabel('⬇️ Tải video')
-          .setURL(pick.url),
-        new ButtonBuilder()
-          .setStyle(ButtonStyle.Link)
-          .setLabel('✂️ Dùng template')
-          .setURL(meta.originalUrl || url)
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
       );
       await interaction.followUp({ components: [row] });
     }

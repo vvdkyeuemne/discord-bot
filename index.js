@@ -950,7 +950,7 @@ const TX = {
       { name:'🔴 Xỉu', value:`Người cược: **${listXiu.length}**\nTổng: **${sum(listXiu).toLocaleString('vi-VN')}**`, inline:false },
     )
     .setFooter({ text:`Phiên #${s.roundId} • ${TX.now()}` });
-}
+},
 row(roundId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`tx_bet_tai_${roundId}`).setStyle(ButtonStyle.Primary).setLabel('💙 Đặt TÀI'),

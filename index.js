@@ -894,6 +894,15 @@ new SlashCommandBuilder()
   .addSubcommand(s=>s.setName('join').setDescription('Tham gia giải đang mở đăng ký'))
   .addSubcommand(s=>s.setName('status').setDescription('Xem tình trạng giải'))
   .addSubcommand(s=>s.setName('cancel').setDescription('Huỷ giải (chỉ admin)')),
+
+new SlashCommandBuilder()
+  .setName('capcut')
+  .setDescription('Tải video từ link CapCut')
+  .addStringOption(o =>
+    o.setName('url')
+     .setDescription('Link CapCut cần tải')
+     .setRequired(true)
+  ),
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -2264,7 +2273,7 @@ embed.addFields({
 // ==== HELP CONFIG: gom nhóm lệnh theo tên (để render đẹp) ====
 const HELP_CATEGORIES = [
   { key: 'auto',    title: '⚡ Tự động tải',     names: ['fbauto','instaauto','tiktokauto'] },
-  { key: 'dl',      title: '📥 Downloader',     names: ['fb','insta','tiktok','news'] },
+  { key: 'dl',      title: '📥 Downloader',     names: ['fb','insta','tiktok','news', 'capcut'] },
 
   // Music (tuỳ bot bạn đang có lệnh nào – để đủ phổ biến)
   { key: 'music',   title: '🎵 Music',          names: ['join','play','playsc','skip','stop','pause','resume','queue','volume','npl'] },
@@ -2274,7 +2283,7 @@ const HELP_CATEGORIES = [
   { key: 'mod',     title: '🛡️ Moderation',    names: ['sendnoti','devsync'] },
 
   // Fun / Games
-  { key: 'fun',     title: '🎲 Vui vẻ',         names: ['roll','8ball','ship','meme','guess','leaderboard','resetwins'] },
+  { key: 'fun',     title: '🎲 Vui vẻ',         names: ['roll','8ball','ship','meme','guess','leaderboard','resetwins','taixiu','rpsls'] },
 
   // Info/Tools
   { key: 'info',    title: '🧰 Tiện ích',       names: ['uptime','serverinfo','profile','botstats','invite','weather','avatar','purge'] },
@@ -3206,6 +3215,74 @@ if (interaction.commandName === 'fbauto') {
     fbSettings.guilds[gid] = { mode: 'channel', channelId: interaction.channelId };
     await saveFacebookSettings();
     return interaction.reply({ content: '✅ Đã bật auto Facebook cho **kênh này**.', ephemeral: true });
+  }
+}
+// ====== /capcut ======
+if (interaction.commandName === 'capcut') {
+  await interaction.deferReply();
+
+  try {
+    const url = interaction.options.getString('url');
+
+    // Gọi API Downr để lấy dữ liệu CapCut
+    const res = await axios.post('https://downr.org/.netlify/functions/download', {
+      url: url
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://downr.org',
+        'Referer': 'https://downr.org/',
+        'User-Agent': 'Mozilla/5.0'
+      },
+      timeout: 20000
+    });
+
+    const data = res?.data;
+    if (!data || !data.medias) {
+      return interaction.editReply('⚠️ Không lấy được dữ liệu từ link CapCut.');
+    }
+
+    // Lấy meta + media
+    const meta = {
+      title: data?.meta?.title || 'Không rõ tiêu đề',
+      author: data?.meta?.author || 'Ẩn danh'
+    };
+
+    const medias = data.medias || [];
+
+    if (!medias.length) {
+      return interaction.editReply('❌ Không tìm thấy file media nào trong link.');
+    }
+
+    // Embed trả kết quả
+    const embed = new EmbedBuilder()
+      .setTitle(`📹 CapCut Download`)
+      .setDescription(`**${meta.title}**\n👤 Tác giả: ${meta.author}`)
+      .setColor(0x00ff99)
+      .setFooter({ text: `Yêu cầu bởi ${interaction.user.tag}` });
+
+    // Nếu có thumbnail
+    if (data.meta?.thumbnail) {
+      embed.setThumbnail(data.meta.thumbnail);
+    }
+
+    // Gửi cùng file media (chỉ lấy cái đầu tiên)
+    const fileUrl = medias[0].url;
+    await interaction.editReply({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel('Tải về')
+            .setStyle(ButtonStyle.Link)
+            .setURL(fileUrl)
+        )
+      ]
+    });
+
+  } catch (e) {
+    console.error('[CapCut handler error]', e);
+    return interaction.editReply('❌ Có lỗi khi xử lý link CapCut.');
   }
 }
 });

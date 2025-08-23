@@ -3252,7 +3252,6 @@ if (interaction.commandName === 'capcut') {
 
 // ==== GỬI VIDEO KHÔNG HIỆN LINK DÀI ====
 // Chọn video
-const pick = medias.find(m => /video/i.test(m.type)) || medias[0];
 if (pick) {
   const safe = (s) => String(s || '')
     .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')

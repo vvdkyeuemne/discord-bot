@@ -4685,6 +4685,26 @@ async function fetchCapcutViaDownr(rawUrl) {
 
   return { medias, meta };
 }
+// ============= Auto CapCut settings =============
+const CAPCUT_SETTINGS_FILE = path.join(process.cwd(), 'capcut-settings.json');
+let capcutSettings = { guilds: {} };
+
+async function loadCapcutSettings() {
+  try {
+    const s = await fs.readFile(CAPCUT_SETTINGS_FILE, 'utf8');
+    capcutSettings = JSON.parse(s || '{"guilds":{}}');
+  } catch {
+    capcutSettings = { guilds: {} };
+  }
+}
+
+async function saveCapcutSettings() {
+  try {
+    await fs.writeFile(CAPCUT_SETTINGS_FILE, JSON.stringify(capcutSettings, null, 2));
+  } catch (e) {
+    console.warn('saveCapcutSettings error:', e?.message || e);
+  }
+}
 // ============= Auto CapCut trong tin nhắn =============
 
 // Giới hạn gửi file (bytes) — chỉnh theo cấp Nitro server của bạn

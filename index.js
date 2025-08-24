@@ -4710,7 +4710,7 @@ function ccExtractFirstUrl(text = '') {
   return m ? m[0] : '';
 }
 // ============= Auto CapCut trong tin nhắn =============
-const CAPCUT_LIMIT = 25 * 1024 * 1024; // 25MB
+const CAPCUT_LIMIT = 8 * 1024 * 1024; // 25MB
 
 // KHÔNG dùng lại tên isCapcutUrl / extractFirstUrl nếu đã có ở trên
 

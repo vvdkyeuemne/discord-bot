@@ -48,6 +48,10 @@ import {
   entersState,              // << thêm
 } from '@discordjs/voice';
 
+// ==== Config cho CapCut Auto (sửa cho đúng Worker của bạn) ====
+const CAPCUT_PROXY_BASE = 'https://capcut-proxy.ytbprmvvdk10.workers.dev/proxy?u='; // <== thay bằng domain Worker bạn
+const CAPCUT_UPLOAD_LIMIT = 25 * 1024 * 1024; // 25MB
+
 // ===== Optional tokens
 if (process.env.YT_COOKIE) {
   play.setToken({ youtube: { cookie: process.env.YT_COOKIE } });
@@ -4714,30 +4718,50 @@ const capcutExtractFirstUrl =
         const m = text.match(/https?:\/\/\S+/);
         return m ? m[0] : '';
       }
+
+// ============= uttils capcutauto ============
+function isCapcutUrl_ccauto(s = '') {
+  return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/\S+/i.test(s);
+}
+function extractFirstUrl_ccauto(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
+}
+function safeName_ccauto(s) {
+  return String(s || '')
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 40);
+}
 // ============= Auto CapCut trong tin nhắn =============
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
-    if (!isCapcutUrl(msg.content || '')) return;
+    if (!isCapcutUrl_ccauto(msg.content || '')) return;
 
+    // nếu bạn đang dùng file cài đặt chế độ auto (off/server/channel)
+    // thì bỏ comment 4 dòng dưới — và đảm bảo đã có loadCapcutSettings()
+    
     await loadCapcutSettings();
     const g = capcutSettings.guilds[msg.guild.id] || { mode: 'off' };
     if (g.mode === 'off') return;
     if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
+    
 
-    const url = capcutExtractFirstUrl(msg.content);
+    const url = extractFirstUrl_ccauto(msg.content);
     if (!url) return;
 
     await msg.channel.sendTyping();
 
-    // Lấy dữ liệu qua utils bạn đang dùng
+    // Lấy dữ liệu qua utils bạn đang dùng (giữ nguyên tên hàm sẵn có)
     const { medias, meta } = await fetchCapcutViaDownr(url);
     if (!Array.isArray(medias) || medias.length === 0) return;
 
-    // Ưu tiên video (giống handler /capcut)
+    // Chọn media “chắc ăn” là video
     const pick =
       medias.find(m => /capcutvod\.com/i.test(m.url)) ||
-      medias.find(m => /mime_type=video/i.test(m.url)) ||
+      medias.find(m => /(?:\?|&)mime_type=video/i.test(m.url)) ||
       medias.find(m => /video/i.test(m.type)) ||
       medias[0];
 
@@ -4749,87 +4773,62 @@ client.on('messageCreate', async (msg) => {
       .setDescription(meta.author ? `👤 Tác giả: **${meta.author}**` : '')
       .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
       .setTimestamp(new Date());
-    if (meta.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) {
+
+    if (meta.thumbnail && /^https?:\/\/\S+/i.test(meta.thumbnail)) {
       embed.setImage(meta.thumbnail);
     }
+    await msg.reply({ embeds: [embed] });
 
-    // --- Gửi embed trước
-await msg.reply({ embeds: [embed] });
-    
-// === GỬI VIDEO KHÔNG LỘ LINK DÀI (phiên bản ổn định hơn) ===
-const chosen =
-  // 1) Ưu tiên .mp4 rõ ràng
-  medias.find(m => /\.mp4(?:\?|$)/i.test(m.url)) ||
-  // 2) capcutvod + mime_type=video
-  medias.find(m => /capcutvod\.com/i.test(m.url) && /(?:\?|&)mime_type=video/i.test(m.url)) ||
-  // 3) capcutvod
-  medias.find(m => /capcutvod\.com/i.test(m.url)) ||
-  // 4) có type=video
-  medias.find(m => /video/i.test(m.type)) ||
-  medias[0];
+    // --- Thử gửi video trực tiếp (không lộ link) ---
+    const chosen = pick;
+    if (!chosen || !/^https?:\/\//i.test(chosen.url)) {
+      // fallback chỉ nút
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen?.url || url),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url),
+      );
+      await msg.reply({ components: [row] });
+      return;
+    }
 
-if (chosen && /^https?:\/\//i.test(chosen.url)) {
-  const safe = (s) => String(s || '')
-    .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
-    .slice(0, 40);
-  const ext = /\.mp4(?:\?|$)/i.test(chosen.url) ? '.mp4' : (chosen.ext ? `.${chosen.ext}` : '.mp4');
-  const fileName = `capcut_${safe(meta.title || 'video')}${ext}`;
-
-  try {
-    // 1) Thử để Discord tự lấy từ URL
-    await msg.channel.send({ files: [{ attachment: chosen.url, name: fileName }] });
-    // console.log('[capcutauto] sent direct url');
-  } catch (e1) {
-    // console.warn('[capcutauto] direct url failed:', e1?.message || e1);
+    // Dùng proxy để Discord có thể tải được file
+    const prox = CAPCUT_PROXY_BASE + encodeURIComponent(chosen.url);
+    const fileName = `capcut_${safeName_ccauto(meta.title || 'video')}.${chosen.ext || 'mp4'}`;
 
     try {
-      // 2) Tự tải về rồi re-upload (<=25MB)
-      const resp = await axios.get(chosen.url, {
+      // Tải về kiểm tra kích thước trước (tránh “Request entity too large”)
+      const resp = await axios.get(prox, {
         responseType: 'arraybuffer',
         timeout: 20000,
-        maxRedirects: 5,
+        headers: { 'User-Agent': 'Mozilla/5.0' },
         validateStatus: () => true,
-        headers: {
-          'User-Agent'      : 'Mozilla/5.0',
-          'Referer'         : 'https://www.capcut.com/',
-          'Origin'          : 'https://www.capcut.com',
-          'Accept'          : '*/*',
-          'Accept-Language' : 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-          // 1 số CDN cần Range để trả về 206 thay vì deny
-          'Range'           : 'bytes=0-'
-        }
       });
 
-      const status = resp?.status || 0;
-      const buf = resp?.data ? Buffer.from(resp.data) : null;
-      if (!buf || !buf.length || status >= 400) {
-        // console.warn('[capcutauto] download failed status/empty:', status, buf?.length);
-        throw new Error('download-failed');
-      }
+      if (resp.status >= 400) throw new Error(`proxy status ${resp.status}`);
 
-      const LIMIT = 25 * 1024 * 1024; // 25MB
-      if (buf.length > LIMIT) {
+      const buf = Buffer.from(resp.data || []);
+      if (buf.length > CAPCUT_UPLOAD_LIMIT) {
+        // >25MB: gửi nút
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
-          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(prox),
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url),
         );
-        await msg.reply({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
+        await msg.reply({ content: '⚠️ Video lớn hơn giới hạn upload.', components: [row] });
       } else {
-        await msg.channel.send({ files: [{ attachment: buf, name: fileName }] });
-        // console.log('[capcutauto] reupload ok:', buf.length);
+        // ≤25MB: re-upload để hiện video trực tiếp
+        await msg.reply({ files: [{ attachment: buf, name: fileName }] });
       }
-
-    } catch (e2) {
-      // 3) Fallback: chỉ gửi nút + note ngắn (để bạn biết rơi nhánh nào)
+    } catch (e) {
+      // Proxy bị chậm/chặn: vẫn gửi nút cho người dùng tự mở
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(prox),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url),
       );
       await msg.reply({ content: '⚠️ Không thể tải video tự động (CDN chặn).', components: [row] });
     }
+  } catch (e) {
+    console.error('[capcutauto error]', e);
   }
-}    
-  } catch { /* nuốt lỗi để tránh spam log */ }
 });
 // ------------------ utils ------------------
 function fmtTime(sec) {

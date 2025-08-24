@@ -4693,104 +4693,118 @@ async function loadCapcutSettings() {
   try {
     const s = await fs.readFile(CAPCUT_SETTINGS_FILE, 'utf8');
     capcutSettings = JSON.parse(s || '{"guilds":{}}');
-  } catch {
-    capcutSettings = { guilds: {} };
-  }
+  } catch { capcutSettings = { guilds: {} }; }
 }
 
 async function saveCapcutSettings() {
   try {
     await fs.writeFile(CAPCUT_SETTINGS_FILE, JSON.stringify(capcutSettings, null, 2));
-  } catch (e) {
-    console.warn('saveCapcutSettings error:', e?.message || e);
-  }
+  } catch (e) { /* no-op */ }
+}
+
+// Nhận diện CapCut URL & rút URL đầu tiên
+function isCapcutUrl(s = '') {
+  return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/[^\s]+/i.test(s);
+}
+function extractFirstUrl(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
 }
 // ============= Auto CapCut trong tin nhắn =============
-
-// Giới hạn gửi file (bytes) — chỉnh theo cấp Nitro server của bạn
-const CAPCUT_LIMIT = 8 * 1024 * 1024; // 8 MB; có thể 25 MB nếu server đủ điều kiện
-
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
+    if (!isCapcutUrl(msg.content || '')) return;
 
-    // 1) Bắt URL đầu tiên + kiểm tra là CapCut hay không
-    const m = (msg.content || '').match(/https?:\/\/\S+/);
-    const url = m ? m[0] : '';
-    if (!url || !/(?:^|\.)(capcut\.com|capcut\.net)\//i.test(url)) return;
-
-    // 2) Đọc cấu hình auto (server / channel / off)
-    await loadCapcutSettings?.(); // nếu bạn đã có loadCapcutSettings
-    const g = (capcutSettings?.guilds || {})[msg.guild.id] || { mode: 'off' };
+    await loadCapcutSettings();
+    const g = capcutSettings.guilds[msg.guild.id] || { mode: 'off' };
     if (g.mode === 'off') return;
     if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
 
+    const url = extractFirstUrl(msg.content);
+    if (!url) return;
+
     await msg.channel.sendTyping();
 
-    // 3) Lấy media qua Downr utils
+    // Lấy dữ liệu qua utils bạn đang dùng
     const { medias, meta } = await fetchCapcutViaDownr(url);
-    if (!Array.isArray(medias) || !medias.length) return;
+    if (!Array.isArray(medias) || medias.length === 0) return;
 
-    // Chọn video "hợp lý" nhất
+    // Ưu tiên video (giống handler /capcut)
     const pick =
       medias.find(m => /capcutvod\.com/i.test(m.url)) ||
+      medias.find(m => /mime_type=video/i.test(m.url)) ||
       medias.find(m => /video/i.test(m.type)) ||
       medias[0];
 
-    // 4) Thử tải video và gửi file để KHÔNG lộ link dài
-    let sentVideo = false;
-    if (pick && /^https?:\/\//i.test(pick.url)) {
-      try {
-        const resp = await axios.get(pick.url, {
-          responseType: 'arraybuffer',
-          timeout: 20000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': 'https://www.capcut.com/'
-          }
-        });
-        const buf = Buffer.from(resp.data);
-        if (buf.length <= CAPCUT_LIMIT) {
-          const safe = (s='') => String(s || '')
-            .normalize('NFKD').replace(/[^\w\s-]/g,'').replace(/\s+/g,'_')
-            .slice(0, 40);
-          const ext = (pick.ext || '').replace(/[^\w.]/g,'') || 'mp4';
-          const fileName = `capcut_${safe(meta.title || 'video')}.${ext}`;
-
-          await msg.reply({ files: [{ attachment: buf, name: fileName }] });
-          sentVideo = true;
-        }
-      } catch (e) {
-        console.warn('[capcutauto] download video failed:', e?.message || e);
-      }
+    // --- Embed thông tin ---
+    const embed = new EmbedBuilder()
+      .setColor(0x00d084)
+      .setTitle(`✂️ CapCut: ${meta.title || 'Template'}`)
+      .setURL(meta.originalUrl || url)
+      .setDescription(meta.author ? `👤 Tác giả: **${meta.author}**` : '')
+      .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
+      .setTimestamp(new Date());
+    if (meta.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) {
+      embed.setImage(meta.thumbnail);
     }
 
-    // 5) Nếu chưa gửi được file ⇒ gửi embed + nút
-    if (!sentVideo) {
-      const embed = new EmbedBuilder()
-        .setColor(0x00d084)
-        .setTitle(`✂️ CapCut: ${meta.title || 'Template'}`)
-        .setURL(meta.originalUrl || url)
-        .setDescription(meta.author ? `👤 Tác giả: **${meta.author}**` : '')
-        .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
-        .setTimestamp(new Date());
+    // Gửi embed trước
+    await msg.reply({ embeds: [embed] });
 
-      if (meta.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) {
-        embed.setImage(meta.thumbnail);
-      }
+    // --- Gửi video (ẩn link dài) ---
+    const chosen = pick || medias.find(m => /video/i.test(m.type)) || medias[0];
+    if (!chosen) return;
 
+    const safe = (s) => String(s || '')
+      .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
+      .slice(0, 40);
+    const fileName = `capcut_${safe(meta.title)}${chosen.ext ? '.'+chosen.ext : '.mp4'}`;
+
+    // 1) thử đính kèm URL trực tiếp (Discord sẽ không hiển thị URL dài)
+    try {
+      await msg.reply({
+        files: [{ attachment: chosen.url, name: fileName }]
+      });
+      // kèm nút Dùng template cho tiện
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setStyle(ButtonStyle.Link)
-          .setLabel('✂️ Dùng template')
-          .setURL(meta.originalUrl || url)
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
       );
+      await msg.reply({ components: [row] });
+      return;
+    } catch { /* thử tải thủ công */ }
 
-      await msg.reply({ embeds: [embed], components: [row] });
+    // 2) tải file rồi upload (nếu ≤ 25MB)
+    try {
+      const resp = await axios.get(chosen.url, {
+        responseType: 'arraybuffer',
+        timeout: 20000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      const buf = Buffer.from(resp.data);
+
+      const LIMIT = 25 * 1024 * 1024; // 25MB
+      if (buf.length > LIMIT) {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+        );
+        await msg.reply({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
+      } else {
+        await msg.reply({ files: [{ attachment: buf, name: fileName }] });
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+        );
+        await msg.reply({ components: [row] });
+      }
+    } catch {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+      );
+      await msg.reply({ components: [row] });
     }
-  } catch (e) {
-    console.error('capcutauto messageCreate error:', e);
-  }
+  } catch { /* nuốt lỗi để tránh spam log */ }
 });
 // ------------------ utils ------------------
 function fmtTime(sec) {

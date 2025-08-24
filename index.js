@@ -4701,15 +4701,19 @@ async function saveCapcutSettings() {
     await fs.writeFile(CAPCUT_SETTINGS_FILE, JSON.stringify(capcutSettings, null, 2));
   } catch (e) { /* no-op */ }
 }
-
-// Nhận diện CapCut URL & rút URL đầu tiên
+// Nhận diện CapCut URL
 function isCapcutUrl(s = '') {
   return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/[^\s]+/i.test(s);
 }
-function extractFirstUrl(text = '') {
-  const m = text.match(/https?:\/\/\S+/);
-  return m ? m[0] : '';
-}
+
+// Dùng lại extractFirstUrl nếu đã có (từ instaauto), nếu chưa thì fallback
+const capcutExtractFirstUrl =
+  (typeof extractFirstUrl === 'function')
+    ? extractFirstUrl
+    : (text = '') => {
+        const m = text.match(/https?:\/\/\S+/);
+        return m ? m[0] : '';
+      }
 // ============= Auto CapCut trong tin nhắn =============
 client.on('messageCreate', async (msg) => {
   try {
@@ -4721,7 +4725,7 @@ client.on('messageCreate', async (msg) => {
     if (g.mode === 'off') return;
     if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
 
-    const url = extractFirstUrl(msg.content);
+    const url = capcutExtractFirstUrl(msg.content);
     if (!url) return;
 
     await msg.channel.sendTyping();

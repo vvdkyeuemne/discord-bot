@@ -903,6 +903,20 @@ new SlashCommandBuilder()
      .setDescription('Link CapCut cần tải')
      .setRequired(true)
   ),
+
+new SlashCommandBuilder()
+  .setName('capcutauto')
+  .setDescription('Bật/tắt tự động xử lý link CapCut trong server/kênh')
+  .addStringOption(o =>
+    o.setName('mode')
+     .setDescription('Chế độ')
+     .addChoices(
+       { name: 'off (tắt)', value: 'off' },
+       { name: 'server (toàn server)', value: 'server' },
+       { name: 'channel (chỉ kênh hiện tại)', value: 'channel' },
+     )
+     .setRequired(true)
+  ),  
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -3298,6 +3312,25 @@ if (chosen) {
     return interaction.editReply('❌ Có lỗi khi xử lý link CapCut.');
   }
 }
+ // === /capcutauto ===
+if (interaction.commandName === 'capcutauto') {
+  const mode = interaction.options.getString('mode', true);
+  await loadCapcutSettings();
+  const gid = interaction.guildId;
+
+  capcutSettings.guilds[gid] = {
+    mode,
+    channelId: interaction.channelId, // dùng khi chọn 'channel'
+  };
+  await saveCapcutSettings();
+
+  const msg =
+    mode === 'off'    ? 'Đã tắt auto CapCut cho server này.'
+  : mode === 'server' ? 'Đã bật auto CapCut cho toàn server.'
+                      : 'Đã bật auto CapCut cho kênh này.';
+
+  return interaction.reply({ content: `✅ ${msg}`, ephemeral: true });
+} 
 });
 
 // ------------------- misc helpers -------------------
@@ -4652,6 +4685,99 @@ async function fetchCapcutViaDownr(rawUrl) {
 
   return { medias, meta };
 }
+// ============= Auto CapCut settings =============
+const CAPCUT_SETTINGS_FILE = path.join(process.cwd(), 'capcut-settings.json');
+let capcutSettings = { guilds: {} };
+
+async function loadCapcutSettings() {
+  try {
+    const s = await fs.readFile(CAPCUT_SETTINGS_FILE, 'utf8');
+    capcutSettings = JSON.parse(s || '{"guilds":{}}');
+  } catch { capcutSettings = { guilds: {} }; }
+}
+async function saveCapcutSettings() {
+  try {
+    await fs.writeFile(CAPCUT_SETTINGS_FILE, JSON.stringify(capcutSettings, null, 2));
+  } catch (e) { console.warn('saveCapcutSettings error:', e?.message || e); }
+}
+
+// nhận diện & rút URL đầu tiên
+function isCapcutUrl(s = '') {
+  return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/[^\s]+/i.test(s);
+}
+function ccExtractFirstUrl(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
+}
+// ============= Auto CapCut trong tin nhắn =============
+client.on('messageCreate', async (msg) => {
+  try {
+    if (!msg.guild || msg.author.bot) return;
+    if (!isCapcutUrl(msg.content || '')) return;
+
+    await loadCapcutSettings();
+    const g = capcutSettings.guilds[msg.guild.id] || { mode: 'off' };
+    if (g.mode === 'off') return;
+    if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
+
+    const url = ccExtractFirstUrl(msg.content);
+    if (!url) return;
+
+    await msg.channel.sendTyping();
+    const { medias, meta } = await fetchCapcutViaDownr(url);
+    if (!Array.isArray(medias) || medias.length === 0) return;
+
+    // ưu tiên video
+    const pick =
+      medias.find(m => /capcutvod\.com/i.test(m.url)) ||
+      medias.find(m => /mime_type=video/i.test(m.url)) ||
+      medias.find(m => /video/i.test(m.type || '')) ||
+      medias[0];
+
+    // thử upload trực tiếp nếu <25MB để tránh link dài
+    let sentVideo = false;
+    try {
+      if (pick && /video/i.test(pick.type || '') && /^https?:\/\//i.test(pick.url)) {
+        const safe = s => String(s || '')
+          .normalize('NFKD').replace(/[^\w\s\-]/g, '').replace(/\s+/g, '_').slice(0, 40);
+        const fileName = `capcut_${safe(meta?.title)}${pick.ext ? '.'+pick.ext : '.mp4'}`;
+
+        const resp = await axios.get(pick.url, {
+          responseType: 'arraybuffer',
+          timeout: 20000,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const buf = Buffer.from(resp.data);
+        if (buf.length <= 25 * 1024 * 1024) {
+          await msg.reply({ files: [{ attachment: buf, name: fileName }] });
+          sentVideo = true;
+        }
+      }
+    } catch {/* bỏ qua nếu lỗi/size lớn */}
+
+    // embed + nút “Dùng template”
+    const cap = (meta?.caption || '').trim();
+    const embed = new EmbedBuilder()
+      .setColor(0x00d084)
+      .setTitle(`✂️ CapCut: ${meta?.title || 'Template'}`)
+      .setURL(meta?.originalUrl || url)
+      .setDescription(
+        (meta?.author ? `👤 Tác giả: **${meta.author}**\n` : '') +
+        (cap ? `\n📖 ${cap.length > 800 ? cap.slice(0, 800) + '…' : cap}` : '')
+      )
+      .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
+      .setTimestamp(new Date());
+    if (meta?.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) embed.setImage(meta.thumbnail);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta?.originalUrl || url)
+    );
+
+    await msg.reply({ embeds: [embed], components: [row] });
+  } catch (e) {
+    console.error('capcut auto error:', e);
+  }
+});
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

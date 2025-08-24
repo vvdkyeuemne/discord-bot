@@ -4710,6 +4710,16 @@ function ccExtractFirstUrl(text = '') {
   return m ? m[0] : '';
 }
 // ============= Auto CapCut trong tin nhắn =============
+const CAPCUT_LIMIT = 25 * 1024 * 1024; // 25MB
+
+function isCapcutUrl(s = '') {
+  return /https?:\/\/(?:www\.)?capcut\.com\/\S+/i.test(s);
+}
+function extractFirstUrl(text = '') {
+  const m = text.match(/https?:\/\/\S+/);
+  return m ? m[0] : '';
+}
+
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
@@ -4720,62 +4730,75 @@ client.on('messageCreate', async (msg) => {
     if (g.mode === 'off') return;
     if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
 
-    const url = ccExtractFirstUrl(msg.content);
+    const url = extractFirstUrl(msg.content);
     if (!url) return;
 
     await msg.channel.sendTyping();
+
+    // Lấy data Downr
     const { medias, meta } = await fetchCapcutViaDownr(url);
     if (!Array.isArray(medias) || medias.length === 0) return;
 
-    // ưu tiên video
+    // Chọn URL video "chắc ăn" nhất
     const pick =
       medias.find(m => /capcutvod\.com/i.test(m.url)) ||
       medias.find(m => /mime_type=video/i.test(m.url)) ||
-      medias.find(m => /video/i.test(m.type || '')) ||
+      medias.find(m => /video/i.test(m.type)) ||
       medias[0];
 
-    // thử upload trực tiếp nếu <25MB để tránh link dài
+    // Thử gửi video trực tiếp trước
     let sentVideo = false;
-    try {
-      if (pick && /video/i.test(pick.type || '') && /^https?:\/\//i.test(pick.url)) {
-        const safe = s => String(s || '')
-          .normalize('NFKD').replace(/[^\w\s\-]/g, '').replace(/\s+/g, '_').slice(0, 40);
-        const fileName = `capcut_${safe(meta?.title)}${pick.ext ? '.'+pick.ext : '.mp4'}`;
-
+    if (pick && /^https?:\/\//i.test(pick.url)) {
+      try {
         const resp = await axios.get(pick.url, {
           responseType: 'arraybuffer',
           timeout: 20000,
-          headers: { 'User-Agent': 'Mozilla/5.0' }
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': 'https://www.capcut.com/'
+          }
         });
         const buf = Buffer.from(resp.data);
-        if (buf.length <= 25 * 1024 * 1024) {
+        if (buf.length <= CAPCUT_LIMIT) {
+          const safe = (s='') => String(s || '')
+            .normalize('NFKD').replace(/[^\w\s\-]/g, '')
+            .replace(/\s+/g, '_').slice(0, 40);
+          const ext = pick.ext?.replace(/^\./,'') || 'mp4';
+          const fileName = `capcut_${safe(meta.title || 'video')}.${ext}`;
+
           await msg.reply({ files: [{ attachment: buf, name: fileName }] });
           sentVideo = true;
         }
+      } catch (e) {
+        console.warn('[capcutauto] download video failed:', e?.message || e);
       }
-    } catch {/* bỏ qua nếu lỗi/size lớn */}
+    }
 
-    // embed + nút “Dùng template”
-    const cap = (meta?.caption || '').trim();
+    // Luôn gửi embed gọn + nút template (fallback khi không gửi được video)
     const embed = new EmbedBuilder()
       .setColor(0x00d084)
-      .setTitle(`✂️ CapCut: ${meta?.title || 'Template'}`)
-      .setURL(meta?.originalUrl || url)
-      .setDescription(
-        (meta?.author ? `👤 Tác giả: **${meta.author}**\n` : '') +
-        (cap ? `\n📖 ${cap.length > 800 ? cap.slice(0, 800) + '…' : cap}` : '')
-      )
+      .setTitle(`✂️ CapCut: ${meta.title || 'Template'}`)
+      .setURL(meta.originalUrl || url)
+      .setDescription(meta.author ? `👤 Tác giả: **${meta.author}**` : '')
       .setFooter({ text: 'Nguồn: CapCut • Downr.org' })
       .setTimestamp(new Date());
-    if (meta?.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) embed.setImage(meta.thumbnail);
+    if (meta.thumbnail && /^https?:\/\//i.test(meta.thumbnail)) {
+      embed.setImage(meta.thumbnail);
+    }
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta?.originalUrl || url)
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel('✂️ Dùng template')
+        .setURL(meta.originalUrl || url)
     );
 
-    await msg.reply({ embeds: [embed], components: [row] });
+    // Nếu đã gửi video, gửi embed + nút như thông tin bổ sung.
+    // Nếu chưa gửi video (do lớn/lỗi) thì embed này chính là fallback.
+    await msg.channel.send({ embeds: [embed], components: [row] });
+
   } catch (e) {
-    console.error('capcut auto error:', e);
+    console.error('capcutauto error:', e);
   }
 });
 // ------------------ utils ------------------

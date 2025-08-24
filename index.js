@@ -4753,33 +4753,31 @@ client.on('messageCreate', async (msg) => {
       embed.setImage(meta.thumbnail);
     }
 
-    // Gửi embed trước
-    await msg.reply({ embeds: [embed] });
+    // --- Gửi embed trước
+await msg.reply({ embeds: [embed] });
 
-    // --- Gửi video (ẩn link dài) ---
-    const chosen = pick || medias.find(m => /video/i.test(m.type)) || medias[0];
-    if (!chosen) return;
+// === GỬI VIDEO KHÔNG LỘ LINK DÀI (giống /capcut) ===
+const chosen =
+  pick ||
+  medias.find(m => /video/i.test(m.type)) ||
+  medias[0];
 
-    const safe = (s) => String(s || '')
-      .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
-      .slice(0, 40);
-    const fileName = `capcut_${safe(meta.title)}${chosen.ext ? '.'+chosen.ext : '.mp4'}`;
+if (chosen && /^https?:\/\//i.test(chosen.url)) {
+  // tên file gọn gàng
+  const safe = (s) => String(s || '')
+    .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
+    .slice(0, 40);
+  const ext = chosen.ext ? `.${chosen.ext}` : '.mp4';
+  const fileName = `capcut_${safe(meta.title || 'video')}${ext}`;
 
-    // 1) thử đính kèm URL trực tiếp (Discord sẽ không hiển thị URL dài)
+  try {
+    // 1) thử upload trực tiếp từ URL (Discord sẽ tự tải về)
+    await msg.reply({
+      files: [{ attachment: chosen.url, name: fileName }]
+    });
+  } catch (e1) {
     try {
-      await msg.reply({
-        files: [{ attachment: chosen.url, name: fileName }]
-      });
-      // kèm nút Dùng template cho tiện
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
-      );
-      await msg.reply({ components: [row] });
-      return;
-    } catch { /* thử tải thủ công */ }
-
-    // 2) tải file rồi upload (nếu ≤ 25MB)
-    try {
+      // 2) tải về -> nếu <=25MB thì re-upload, nếu >25MB thì gửi nút
       const resp = await axios.get(chosen.url, {
         responseType: 'arraybuffer',
         timeout: 20000,
@@ -4790,24 +4788,37 @@ client.on('messageCreate', async (msg) => {
       const LIMIT = 25 * 1024 * 1024; // 25MB
       if (buf.length > LIMIT) {
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
-          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel('⬇️ Tải video')
+            .setURL(chosen.url),
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel('✂️ Dùng template')
+            .setURL(meta.originalUrl || url)
         );
         await msg.reply({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
       } else {
-        await msg.reply({ files: [{ attachment: buf, name: fileName }] });
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
-        );
-        await msg.reply({ components: [row] });
+        await msg.reply({
+          files: [{ attachment: buf, name: fileName }]
+        });
       }
-    } catch {
+    } catch (e2) {
+      // 3) fallback: chỉ gửi nút
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel('⬇️ Tải video')
+          .setURL(chosen.url),
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel('✂️ Dùng template')
+          .setURL(meta.originalUrl || url)
       );
       await msg.reply({ components: [row] });
     }
+  }
+  }
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
 // ------------------ utils ------------------

@@ -4712,25 +4712,29 @@ function ccExtractFirstUrl(text = '') {
 // ============= Auto CapCut trong tin nhắn =============
 const CAPCUT_LIMIT = 25 * 1024 * 1024; // 25MB
 
-function isCapcutUrl(s = '') {
+// KHÔNG dùng lại tên isCapcutUrl / extractFirstUrl nếu đã có ở trên
+
+function ccIsCapcutUrl(s = '') {
   return /https?:\/\/(?:www\.)?capcut\.com\/\S+/i.test(s);
 }
-function extractFirstUrl(text = '') {
+
+function ccExtractFirstUrl(text = '') {
   const m = text.match(/https?:\/\/\S+/);
   return m ? m[0] : '';
 }
 
+
 client.on('messageCreate', async (msg) => {
   try {
     if (!msg.guild || msg.author.bot) return;
-    if (!isCapcutUrl(msg.content || '')) return;
-
+   if (!ccIsCapcutUrl(msg.content || '')) return;
+    
     await loadCapcutSettings();
     const g = capcutSettings.guilds[msg.guild.id] || { mode: 'off' };
     if (g.mode === 'off') return;
     if (g.mode === 'channel' && g.channelId && g.channelId !== msg.channel.id) return;
 
-    const url = extractFirstUrl(msg.content);
+    const url = ccExtractFirstUrl(msg.content);
     if (!url) return;
 
     await msg.channel.sendTyping();

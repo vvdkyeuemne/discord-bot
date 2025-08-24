@@ -4755,15 +4755,15 @@ client.on('messageCreate', async (msg) => {
 
     // --- Gửi embed trước
 await msg.reply({ embeds: [embed] });
-
-// === GỬI VIDEO KHÔNG LỘ LINK DÀI (giống /capcut) ===
+// === GỬI VIDEO KHÔNG LỘ LINK DÀI (ổn định hơn) ===
 const chosen =
   pick ||
+  medias.find(m => /capcutvod\.com/i.test(m.url)) ||
+  medias.find(m => /(?:\?|&)mime_type=video/i.test(m.url)) ||
   medias.find(m => /video/i.test(m.type)) ||
   medias[0];
 
 if (chosen && /^https?:\/\//i.test(chosen.url)) {
-  // tên file gọn gàng
   const safe = (s) => String(s || '')
     .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
     .slice(0, 40);
@@ -4771,22 +4771,34 @@ if (chosen && /^https?:\/\//i.test(chosen.url)) {
   const fileName = `capcut_${safe(meta.title || 'video')}${ext}`;
 
   try {
-    // 1) thử upload trực tiếp từ URL (Discord sẽ tự tải về)
-    await msg.reply({
+    // 1) Thử upload trực tiếp từ URL (dùng channel.send thay vì reply)
+    await msg.channel.send({
       files: [{ attachment: chosen.url, name: fileName }]
     });
+    // console.log('[capcutauto] sent direct url');
   } catch (e1) {
+    // console.warn('[capcutauto] direct url failed:', e1?.message || e1);
     try {
-      // 2) tải về -> nếu <=25MB thì re-upload, nếu >25MB thì gửi nút
+      // 2) Tải về -> nếu <=25MB thì re-upload, nếu >25MB thì nút
       const resp = await axios.get(chosen.url, {
         responseType: 'arraybuffer',
         timeout: 20000,
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Referer'   : 'https://www.capcut.com/',
+          'Accept'    : '*/*'
+        },
+        // đôi khi redirect nhiều tầng
+        maxRedirects: 5,
+        validateStatus: () => true
       });
-      const buf = Buffer.from(resp.data);
 
+      if (!resp?.data) throw new Error('empty data');
+      const buf = Buffer.from(resp.data);
       const LIMIT = 25 * 1024 * 1024; // 25MB
+
       if (buf.length > LIMIT) {
+        // console.log('[capcutauto] file too large:', buf.length);
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setStyle(ButtonStyle.Link)
@@ -4799,12 +4811,14 @@ if (chosen && /^https?:\/\//i.test(chosen.url)) {
         );
         await msg.reply({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
       } else {
-        await msg.reply({
+        await msg.channel.send({
           files: [{ attachment: buf, name: fileName }]
         });
+        // console.log('[capcutauto] reupload buffer ok:', buf.length);
       }
     } catch (e2) {
-      // 3) fallback: chỉ gửi nút
+      // 3) Fallback: chỉ gửi nút
+      // console.warn('[capcutauto] download/reupload failed:', e2?.message || e2);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setStyle(ButtonStyle.Link)
@@ -4818,7 +4832,7 @@ if (chosen && /^https?:\/\//i.test(chosen.url)) {
       await msg.reply({ components: [row] });
     }
   }
-  }
+}
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
 // ------------------ utils ------------------

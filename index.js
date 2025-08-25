@@ -5415,9 +5415,6 @@ client.on(Events.InteractionCreate, async (itx) => {
 });
 
 // ============== PET STORAGE ==============
-import fs from 'fs/promises';
-import path from 'path';
-
 const PETS_FILE = process.env.PETS_FILE || (process.platform === 'win32'
   ? path.join(process.cwd(), 'pets.json')    // Windows local dev
   : '/data/pets.json'                        // Railway Volume (khuyên dùng)

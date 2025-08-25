@@ -48,16 +48,6 @@ import {
   entersState,              // << thêm
 } from '@discordjs/voice';
 
-// ================== CapCut Auto (constants + helpers) ==================
-const CAPCUT_PROXY_BASE  = 'https://capcut-proxy.ytbprmvvdk10.workers.dev/proxy?u=';
-const CAPCUT_UPLOAD_LIMIT = 25 * 1024 * 1024; // 25MB
-// Helpers
-function isCapcutUrl_ccauto(s=''){ return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/\S+/i.test(s); }
-function extractFirstUrl_ccauto(t=''){ const m=t.match(/https?:\/\/\S+/); return m?m[0]:''; }
-function safeName_ccauto(s){
-  return String(s||'').normalize('NFKD').replace(/[^\w\s-]/g,'').replace(/\s+/g,'_').slice(0,40);
-}
-
 // ===== Optional tokens
 if (process.env.YT_COOKIE) {
   play.setToken({ youtube: { cookie: process.env.YT_COOKIE } });
@@ -4724,6 +4714,10 @@ const capcutExtractFirstUrl =
         const m = text.match(/https?:\/\/\S+/);
         return m ? m[0] : '';
     }
+// ================== CapCut Auto (constants + helpers) ==================
+const CAPCUT_PROXY_BASE  = 'https://capcut-proxy.ytbprmvvdk10.workers.dev/proxy?u=';
+const CAPCUT_UPLOAD_LIMIT = 25 * 1024 * 1024; // 25MB
+                                                                                        
 // ============= Helpers cho capcutauto =============
 function isCapcutUrl_ccauto(s = '') {
   return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/\S+/i.test(s);

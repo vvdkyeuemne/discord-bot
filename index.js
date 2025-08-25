@@ -5199,7 +5199,6 @@ async function playNextSC(gid, client) {
 }
 
 // ====== /SOUNDCloud music core ======
-});
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

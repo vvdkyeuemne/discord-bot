@@ -4714,48 +4714,6 @@ const capcutExtractFirstUrl =
         const m = text.match(/https?:\/\/\S+/);
         return m ? m[0] : '';
     }
-// ================== CapCut Auto (constants + helpers) ==================
-const CAPCUT_PROXY_BASE  = 'https://capcut-proxy.ytbprmvvdk10.workers.dev/proxy?u=';
-const CAPCUT_UPLOAD_LIMIT = 25 * 1024 * 1024; // 25MB
-                                                                                        
-// ============= Helpers cho capcutauto =============
-function isCapcutUrl_ccauto(s = '') {
-  return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/\S+/i.test(s);
-}
-function extractFirstUrl_ccauto(text = '') {
-  const m = text.match(/https?:\/\/\S+/);
-  return m ? m[0] : '';
-}
-function safeName_ccauto(s) {
-  return String(s || '')
-    .normalize('NFKD')
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '_')
-    .slice(0, 40);
-}
-
-/** Chỉ tạo nút khi URL <= 512 ký tự để tránh 50035 */
-function buildButtons_ccauto(downloadUrl, templateUrl) {
-  const buttons = [];
-
-  if (downloadUrl && downloadUrl.length <= 512) {
-    buttons.push(
-      new ButtonBuilder()
-        .setStyle(ButtonStyle.Link)
-        .setLabel('⬇️ Tải video')
-        .setURL(downloadUrl)
-    );
-  }
-  if (templateUrl && /^https?:\/\//i.test(templateUrl)) {
-    buttons.push(
-      new ButtonBuilder()
-        .setStyle(ButtonStyle.Link)
-        .setLabel('✂️ Dùng template')
-        .setURL(templateUrl)
-    );
-  }
-  return buttons.length ? [ new ActionRowBuilder().addComponents(...buttons) ] : [];
-}
 
 // ============= Auto CapCut trong tin nhắn =============
 client.on('messageCreate', async (msg) => {
@@ -4792,57 +4750,76 @@ client.on('messageCreate', async (msg) => {
     }
     await msg.reply({ embeds: [embed] });
 
-    // --- Thử gửi video trực tiếp (không lộ link dài) ---
-const chosen = pick;
-if (!chosen || !/^https?:\/\//i.test(chosen.url)) return;
+   // === GỬI VIDEO KHÔNG LỘ LINK DÀI (phiên bản ổn định hơn) ===
+const chosen =
+  // 1) Ưu tiên .mp4 rõ ràng
+  medias.find(m => /\.mp4(?:\?|$)/i.test(m.url)) ||
+  // 2) capcutvod + mime_type=video
+  medias.find(m => /capcutvod\.com/i.test(m.url) && /(?:\?|&)mime_type=video/i.test(m.url)) ||
+  // 3) capcutvod
+  medias.find(m => /capcutvod\.com/i.test(m.url)) ||
+  // 4) có type=video
+  medias.find(m => /video/i.test(m.type)) ||
+  medias[0];
 
-const base = `capcut_${safeName_ccauto(meta.title || 'video')}`;
-const ext  = chosen.ext ? `.${chosen.ext}` : '.mp4';
-const fileName = `${base}${ext}`;
-const proxyUrl = CAPCUT_PROXY_BASE + encodeURIComponent(chosen.url);
+if (chosen && /^https?:\/\//i.test(chosen.url)) {
+  const safe = (s) => String(s || '')
+    .normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')
+    .slice(0, 40);
+  const ext = /\.mp4(?:\?|$)/i.test(chosen.url) ? '.mp4' : (chosen.ext ? `.${chosen.ext}` : '.mp4');
+  const fileName = `capcut_${safe(meta.title || 'video')}${ext}`;
 
-// 1) Đính kèm trực tiếp từ VOD
-try {
-  await msg.reply({
-    files: [{ attachment: chosen.url, name: fileName }]
-  });
-  return;
-} catch (e1) {
-  // 2) Đính kèm trực tiếp từ proxy Worker
   try {
-    await msg.reply({
-      files: [{ attachment: proxyUrl, name: fileName }]
-    });
-    return;
-  } catch (e2) {
-    // 3) Tải qua proxy -> re-upload (nếu <=25MB)
-    try {
-      const resp = await axios.get(proxyUrl, {
-        responseType: 'arraybuffer',
-        timeout: 25000,
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      const buf = Buffer.from(resp.data);
+    // 1) Thử để Discord tự lấy từ URL
+    await msg.channel.send({ files: [{ attachment: chosen.url, name: fileName }] });
+    // console.log('[capcutauto] sent direct url');
+  } catch (e1) {
+    // console.warn('[capcutauto] direct url failed:', e1?.message || e1);
 
-      if (buf.length <= CAPCUT_UPLOAD_LIMIT) {
-        await msg.reply({
-          files: [{ attachment: buf, name: fileName }]
-        });
-        return;
+    try {
+      // 2) Tự tải về rồi re-upload (<=25MB)
+      const resp = await axios.get(chosen.url, {
+        responseType: 'arraybuffer',
+        timeout: 20000,
+        maxRedirects: 5,
+        validateStatus: () => true,
+        headers: {
+          'User-Agent'      : 'Mozilla/5.0',
+          'Referer'         : 'https://www.capcut.com/',
+          'Origin'          : 'https://www.capcut.com',
+          'Accept'          : '*/*',
+          'Accept-Language' : 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+          // 1 số CDN cần Range để trả về 206 thay vì deny
+          'Range'           : 'bytes=0-'
+        }
+      });
+
+      const status = resp?.status || 0;
+      const buf = resp?.data ? Buffer.from(resp.data) : null;
+      if (!buf || !buf.length || status >= 400) {
+        // console.warn('[capcutauto] download failed status/empty:', status, buf?.length);
+        throw new Error('download-failed');
       }
 
-      // 4) File > 25MB => gửi nút (chỉ add nút nếu URL <= 512)
-      const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
-      await msg.reply({
-        content: '📦 Video lớn hơn giới hạn upload.',
-        components: rows.length ? rows : undefined
-      });
-    } catch (e3) {
-      const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
-      await msg.reply({
-        content: '⚠️ Không thể tải video tự động (CDN chặn).',
-        components: rows.length ? rows : undefined
-      });
+      const LIMIT = 25 * 1024 * 1024; // 25MB
+      if (buf.length > LIMIT) {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+        );
+        await msg.reply({ content: '📦 Video lớn hơn giới hạn upload.', components: [row] });
+      } else {
+        await msg.channel.send({ files: [{ attachment: buf, name: fileName }] });
+        // console.log('[capcutauto] reupload ok:', buf.length);
+      }
+
+    } catch (e2) {
+      // 3) Fallback: chỉ gửi nút + note ngắn (để bạn biết rơi nhánh nào)
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('⬇️ Tải video').setURL(chosen.url),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('✂️ Dùng template').setURL(meta.originalUrl || url)
+      );
+      await msg.reply({ content: '⚠️ Không thể tải video tự động (CDN chặn).', components: [row] });
     }
   }
 }

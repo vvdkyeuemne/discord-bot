@@ -3386,6 +3386,7 @@ async function resolveSoundCloudUrl(url) {
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;
   const sub = interaction.options.getSubcommand();
+
   await loadPlaylists();
   const store = getGuildPL(gid);
 
@@ -3402,7 +3403,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
     // --- /playlist create name:xxx ---
     if (sub === 'create') {
       const name = interaction.options.getString('name', true);
-      const key = name.toLowerCase().trim();
+      const key  = name.toLowerCase().trim();
       if (store[key]) {
         return interaction.reply({ content: `⚠️ Playlist **${name}** đã tồn tại.`, ephemeral: true });
       }
@@ -3411,60 +3412,56 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
       return interaction.reply(`✅ Tạo playlist **${name}** thành công (rỗng).`);
     }
 
-   // --- /playlist add name:xxx q:<SC link hoặc từ khóa/short link> ---
-if (sub === 'add') {
-  const name = interaction.options.getString('name', true);
-  const q    = interaction.options.getString('q', true);
-  const { key, list } = ensurePL(name);
+    // --- /playlist add name:xxx q:<SC link / từ khóa / on.soundcloud.com> ---
+    if (sub === 'add') {
+      const name = interaction.options.getString('name', true);
+      const q    = interaction.options.getString('q', true);
+      const { list } = ensurePL(name);
 
-  await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
 
-  let input = q.trim();
-  // 1) nếu là short link on.soundcloud.com -> resolve sang link đầy đủ
-  input = await resolveSoundCloudUrl(input);
+      // 1) resolve shortlink on.soundcloud.com nếu có
+      let input = (q || '').trim();
+      input = await resolveSoundCloudUrl(input);
 
-  let urls = [];
+      let urls = [];
 
-  // 2) Playlist gốc: /.../sets/...
-  if (/soundcloud\.com\/[^/]+\/sets\/[^/]+/i.test(input)) {
-    try {
-      const pl = await play.soundcloud(input); // play-dl sẽ trả về playlist object nếu đúng
-      if (pl?.tracks?.length) {
-        urls = pl.tracks
-          .map(t => t?.url)
-          .filter(u => typeof u === 'string' && /^https?:\/\//i.test(u));
+      // 2) playlist gốc: .../sets/...
+      if (/soundcloud\.com\/[^/]+\/sets\/[^/]+/i.test(input)) {
+        try {
+          const pl = await play.soundcloud(input); // play-dl trả về playlist object
+          if (pl?.tracks?.length) {
+            urls = pl.tracks
+              .map(t => t?.url)
+              .filter(u => typeof u === 'string' && /^https?:\/\//i.test(u));
+          }
+        } catch (e) {
+          console.warn('SC playlist fetch error:', e?.message || e);
+        }
       }
-    } catch (e) {
-      console.warn('SC playlist fetch error:', e?.message || e);
+      // 3) link 1 track
+      else if (/soundcloud\.com\//i.test(input)) {
+        urls = [input];
+      }
+      // 4) từ khoá -> search 1 bài
+      else {
+        const results = await play.search(q, { limit: 1, source: { soundcloud: "tracks" } }).catch(() => []);
+        if (results?.length) urls = [results[0].url];
+      }
+
+      if (!urls.length) {
+        return interaction.editReply('❌ Không tìm thấy bài/playlist SoundCloud phù hợp.');
+      }
+
+      list.push(...urls);
+      await savePlaylists();
+
+      const added = urls.length;
+      const preview = urls.slice(0, 3).map(u => `• <${u}>`).join('\n');
+      const more = added > 3 ? `\n… và ${added - 3} bài nữa.` : '';
+      return interaction.editReply(`✅ Đã thêm **${added}** link vào **${name}**:\n${preview}${more}`);
     }
-  }
-  // 3) Link 1 bài track thường
-  else if (/soundcloud\.com\//i.test(input)) {
-    urls = [input];
-  }
-  // 4) Từ khoá -> search 1 bài
-  else {
-    const results = await play.search(q, { limit: 1, source: { soundcloud: "tracks" } }).catch(()=>[]);
-    if (results?.length) urls = [results[0].url];
-  }
 
-  if (!urls.length) {
-    return interaction.editReply('❌ Không tìm thấy bài/playlist SoundCloud phù hợp.');
-  }
-
-  // 5) Thêm vào playlist & lưu
-  list.push(...urls);
-  await savePlaylists();
-
-  // 6) Thông báo gọn gàng
-  const addedCount = urls.length;
-  const preview = urls.slice(0, 3).map(u => `• <${u}>`).join('\n');
-  const more = addedCount > 3 ? `\n… và ${addedCount - 3} bài nữa.` : '';
-
-  return interaction.editReply(
-    `✅ Đã thêm **${addedCount}** link vào **${name}**:\n${preview}${more}`
-  );
-}
     // --- /playlist view name:xxx [page] ---
     if (sub === 'view') {
       const name = interaction.options.getString('name', true);
@@ -3491,50 +3488,35 @@ if (sub === 'add') {
       });
     }
 
-// --- /playlist add name:xxx q:<SC link hoặc từ khóa> ---
-if (sub === 'add') {
-  const name = interaction.options.getString('name', true);
-  const q    = interaction.options.getString('q', true);
-  const { list } = ensurePL(name);
+    // --- /playlist play name:xxx ---
+    if (sub === 'play') {
+      await interaction.deferReply({ ephemeral: true });
 
-  await interaction.deferReply({ ephemeral: true });
+      const name = interaction.options.getString('name', true);
+      const { list } = ensurePL(name);
+      if (list.length === 0) return interaction.editReply(`(Trống) **${name}** chưa có bài.`);
 
-  let urls = [];
+      // phải ở voice
+      const vch = interaction.member?.voice?.channel;
+      if (!vch) return interaction.editReply('🎧 Vào voice channel trước đã!');
 
-  if (/soundcloud\.com\/.*\/sets\//i.test(q)) {
-    // Nếu là link playlist SoundCloud
-    try {
-      const plInfo = await play.soundcloud(q);
-      if (plInfo?.tracks?.length) {
-        urls = plInfo.tracks.map(t => t.url);
+      // kết nối voice nếu cần
+      const state = ensureGuildMusicSC(gid);
+      if (!state.connection || state.connection.state.status !== VoiceConnectionStatus.Ready) {
+        state.connection = await connectToVoiceSC(vch).catch(() => null);
       }
-    } catch (e) {
-      console.error('SC playlist fetch error:', e);
+      if (!state.connection) return interaction.editReply('❌ Không kết nối được voice.');
+
+      // nơi bot sẽ gửi “Now Playing” và nút điều khiển
+      state.textChannelId = interaction.channelId;
+
+      // đẩy vào hàng đợi và phát nếu đang rảnh
+      state.queue.push(...list);
+      if (!state.playing) playNextSC(gid, client);
+
+      return interaction.editReply(`🎶 Đã xếp **${list.length}** bài từ **${name}** vào hàng đợi.`);
     }
-  } else if (/soundcloud\.com\//i.test(q)) {
-    // Link 1 bài
-    urls = [q.trim()];
-  } else {
-    // Tìm kiếm theo từ khóa
-    const results = await play.search(q, { limit: 1, source: { soundcloud: "tracks" } });
-    if (!results?.length) {
-      return interaction.editReply('❌ Không tìm thấy bài SoundCloud phù hợp.');
-    }
-    urls = [results[0].url];
-  }
 
-  if (!urls.length) {
-    return interaction.editReply('❌ Không lấy được bài từ link/playlist.');
-  }
-
-  // Đẩy toàn bộ vào playlist
-  list.push(...urls);
-  await savePlaylists();
-
-  return interaction.editReply(
-    `✅ Đã thêm **${urls.length}** bài vào **${name}**.`
-  );
-}   
     // --- /playlist shuffle name:xxx ---
     if (sub === 'shuffle') {
       const name = interaction.options.getString('name', true);
@@ -3551,7 +3533,7 @@ if (sub === 'add') {
     // --- /playlist delete name:xxx ---
     if (sub === 'delete') {
       const name = interaction.options.getString('name', true);
-      const key = name.toLowerCase().trim();
+      const key  = name.toLowerCase().trim();
       if (!store[key]) return interaction.reply(`❌ Không tìm thấy playlist **${name}**.`);
       delete store[key];
       await savePlaylists();
@@ -3563,7 +3545,6 @@ if (sub === 'add') {
     return interaction.reply({ content: '❌ Có lỗi xảy ra với playlist.', ephemeral: true });
   }
 }
-
 client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
   const [action, gid] = itx.customId.split(':');

@@ -3386,8 +3386,8 @@ async function resolveSoundCloudUrl(url) {
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;
   const sub = interaction.options.getSubcommand();
-  await SC.loadPlaylists();
-  const store = SC.getGuildPL(gid);
+  await loadPlaylists();
+  const store = getGuildPL(gid);
 
   // helpers
   const ensurePL = (name) => {
@@ -3407,7 +3407,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
         return interaction.reply({ content: `⚠️ Playlist **${name}** đã tồn tại.`, ephemeral: true });
       }
       store[key] = [];
-      await SC.savePlaylists();
+      await savePlaylists();
       return interaction.reply(`✅ Tạo playlist **${name}** thành công (rỗng).`);
     }
 
@@ -3454,7 +3454,7 @@ if (sub === 'add') {
 
   // 5) Thêm vào playlist & lưu
   list.push(...urls);
-  await SC.savePlaylists();
+  await savePlaylists();
 
   // 6) Thông báo gọn gàng
   const addedCount = urls.length;
@@ -3529,7 +3529,7 @@ if (sub === 'add') {
 
   // Đẩy toàn bộ vào playlist
   list.push(...urls);
-  await SC.savePlaylists();
+  await savePlaylists();
 
   return interaction.editReply(
     `✅ Đã thêm **${urls.length}** bài vào **${name}**.`
@@ -3544,7 +3544,7 @@ if (sub === 'add') {
         const j = Math.floor(Math.random() * (i + 1));
         [list[i], list[j]] = [list[j], list[i]];
       }
-      await SC.savePlaylists();
+      await savePlaylists();
       return interaction.reply(`🔀 Đã xáo trộn **${name}** (${list.length} bài).`);
     }
 
@@ -3554,7 +3554,7 @@ if (sub === 'add') {
       const key = name.toLowerCase().trim();
       if (!store[key]) return interaction.reply(`❌ Không tìm thấy playlist **${name}**.`);
       delete store[key];
-      await SC.savePlaylists();
+      await savePlaylists();
       return interaction.reply(`🗑️ Đã xoá playlist **${name}**.`);
     }
 
@@ -5197,6 +5197,7 @@ async function playNextSC(gid, client) {
 }
 
 // ====== /SOUNDCloud music core ======
+});
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";
@@ -5207,4 +5208,3 @@ function fmtTime(sec) {
 
 process.on('unhandledRejection', (r) => console.error('UNHANDLED', r));
 process.on('uncaughtException', (e) => console.error('UNCAUGHT', e));
-  });

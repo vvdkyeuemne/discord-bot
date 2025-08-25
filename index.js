@@ -917,6 +917,42 @@ new SlashCommandBuilder()
      )
      .setRequired(true)
   ),  
+
+new SlashCommandBuilder()
+  .setName('playlist')
+  .setDescription('Quản lý & phát playlist (SoundCloud)')
+  .addSubcommand(sc =>
+    sc.setName('create')
+      .setDescription('Tạo playlist mới cho server')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('add')
+      .setDescription('Thêm bài vào playlist (SoundCloud link hoặc từ khóa)')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+      .addStringOption(o => o.setName('q').setDescription('Link SoundCloud hoặc từ khóa').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('view')
+      .setDescription('Xem playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+      .addIntegerOption(o => o.setName('page').setDescription('Trang').setMinValue(1))
+  )
+  .addSubcommand(sc =>
+    sc.setName('play')
+      .setDescription('Phát playlist vào voice')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('shuffle')
+      .setDescription('Xáo trộn playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('delete')
+      .setDescription('Xóa playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  ),  
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------

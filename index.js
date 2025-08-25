@@ -5066,27 +5066,29 @@ client.on('messageCreate', async (msg) => {
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
 
-// ====== PLAYLIST STORE (server-scoped) + SIMPLE MUSIC QUEUE (SoundCloud) ======
+// ====== PLAYLIST STORE (file playlists.json) ======
 const PLAYLISTS_FILE = path.join(process.cwd(), 'playlists.json');
+let playlists = { guilds: {} };                 // bộ nhớ RAM
 
-const SC = (() => {
-  // --- store playlists ---
-  let playlists = { guilds: {} };
-  async function loadPlaylists() {
-    try {
-      const t = await fs.readFile(PLAYLISTS_FILE, 'utf8');
-      playlists = JSON.parse(t || '{"guilds":{}}');
-    } catch { playlists = { guilds: {} }; }
+export async function loadPlaylists() {
+  try {
+    const t = await fs.readFile(PLAYLISTS_FILE, 'utf8');
+    playlists = JSON.parse(t || '{"guilds":{}}');
+  } catch {
+    playlists = { guilds: {} };
   }
-  async function savePlaylists() {
-    try {
-      await fs.writeFile(PLAYLISTS_FILE, JSON.stringify(playlists, null, 2));
-    } catch (e) { console.warn('savePlaylists error:', e?.message || e); }
+}
+export async function savePlaylists() {
+  try {
+    await fs.writeFile(PLAYLISTS_FILE, JSON.stringify(playlists, null, 2));
+  } catch (e) {
+    console.warn('savePlaylists error:', e?.message || e);
   }
-  function getGuildPL(gid) {
-    if (!playlists.guilds[gid]) playlists.guilds[gid] = {};
-    return playlists.guilds[gid];
-  }
+}
+export function getGuildPL(gid) {
+  if (!playlists.guilds[gid]) playlists.guilds[gid] = {};
+  return playlists.guilds[gid];
+   }
 
   // ====== SOUNDCloud music core (1 khối duy nhất) ======
 const Music = new Map(); // gid -> state

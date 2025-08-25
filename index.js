@@ -5138,12 +5138,15 @@ async function playNextSC(gid, client) {
 
   try {
     let info = null;
-    try { info = await play.soundcloud(url); } catch {}
-    const title  = info?.name || 'SoundCloud Track';
-    const artist = info?.publisher || info?.user?.name || '';
-    const thumb  = info?.thumbnail || null;
-    const durSec = info?.durationInSec || null;
+try { info = await play.soundcloud(url); } catch {}
 
+const title  = (typeof info?.name === 'string' && info.name) || 'SoundCloud Track';
+const artist =
+  (typeof info?.publisher === 'string' && info.publisher) ||
+  (typeof info?.user?.name === 'string' && info.user.name) ||
+  '';
+const thumb  = (typeof info?.thumbnail === 'string' && info.thumbnail) || null;
+const durSec = (typeof info?.durationInSec === 'number' && info.durationInSec) || null;
     const s = await play.stream(url);
     const resource = createAudioResource(s.stream, { inputType: s.type });
 
@@ -5154,14 +5157,15 @@ async function playNextSC(gid, client) {
     if (state.textChannelId) {
       const ch = await client.channels.fetch(state.textChannelId).catch(() => null);
       if (ch?.isTextBased()) {
-        const embed = new EmbedBuilder()
-          .setColor(0xff914d)
-          .setTitle(`🎵 ${title}`).setURL(url)
-          .setDescription(artist ? `👤 **${artist}**` : null)
-          .addFields({ name: '⏱ Thời lượng', value: durSec ? fmtDur(durSec) : '—', inline: true })
-          .setTimestamp(Date.now());
-        if (thumb) embed.setThumbnail(thumb);
-
+      const embed = new EmbedBuilder()
+      .setColor(0xff914d)
+      .setTitle(`🎵 ${title}`)
+      .setURL(url)
+      .setDescription(artist ? `👤 **${artist}**` : '\u200b')   // <- thay vì null
+      .addFields({ name: '⏱ Thời lượng', value: durSec ? fmtDur(durSec) : '—', inline: true })
+      .setTimestamp(Date.now());
+      if (thumb) embed.setThumbnail(thumb);
+        
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`sc_pause:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('⏸️'),
           new ButtonBuilder().setCustomId(`sc_resume:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('▶️'),
@@ -5179,7 +5183,45 @@ async function playNextSC(gid, client) {
   }
 }
 
-// ====== /SOUNDCloud music core ======
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+
+  const [action, gid] = (itx.customId || '').split(':');
+  if (!gid || itx.guildId !== gid) return;
+
+  const state = Music.get(gid);
+  if (!state) {
+    return itx.reply({ content: 'Không có phiên phát nhạc.', ephemeral: true }).catch(() => {});
+  }
+
+  // Luôn ack trong 3s để tránh "interaction failed"
+  if (!itx.deferred && !itx.replied) {
+    await itx.deferUpdate().catch(() => {});
+  }
+
+  let msg = '';
+  try {
+    if (action === 'sc_pause')  { state.player?.pause(true);        msg = '⏸ Đã tạm dừng.'; }
+    else if (action === 'sc_resume') { state.player?.unpause();     msg = '▶️ Tiếp tục.'; }
+    else if (action === 'sc_skip')   { state.player?.stop(true);    msg = '⏭️ Bỏ qua.'; }
+    else if (action === 'sc_stop') {
+      state.queue = []; state.loop = false;
+      try { state.player?.stop(true); } catch {}
+      try { state.connection?.destroy(); } catch {}
+      state.playing = false;
+      msg = '⏹️ Dừng & rời kênh.';
+    }
+    else if (action === 'sc_loop') {
+      state.loop = !state.loop;
+      msg = state.loop ? '🔁 Bật lặp 1 bài.' : '➡️ Tắt lặp.';
+    }
+
+    // gửi feedback (sau khi đã deferUpdate)
+    await itx.followUp({ content: msg || '✅ OK', ephemeral: true }).catch(() => {});
+  } catch (e) {
+    await itx.followUp({ content: '❌ Lỗi khi xử lý nút.', ephemeral: true }).catch(() => {});
+  }
+});
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

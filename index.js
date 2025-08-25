@@ -3367,7 +3367,6 @@ if (interaction.commandName === 'capcutauto') {
 
   return interaction.reply({ content: `✅ ${msg}`, ephemeral: true });
 } 
-
 // ==== /playlist (SoundCloud) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;
@@ -3375,7 +3374,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
   await SC.loadPlaylists();
   const store = SC.getGuildPL(gid);
 
-  // tiện ích
+  // helpers
   const ensurePL = (name) => {
     const key = name.toLowerCase().trim();
     if (!store[key]) store[key] = [];
@@ -3401,7 +3400,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
     if (sub === 'add') {
       const name = interaction.options.getString('name', true);
       const q    = interaction.options.getString('q', true);
-      const { key, list } = ensurePL(name);
+      const { list } = ensurePL(name);
 
       await interaction.deferReply({ ephemeral: true });
 
@@ -3409,11 +3408,12 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
       if (!/soundcloud\.com\//i.test(url)) {
         // tìm 1 bài trên SoundCloud
         const results = await play.search(q, { limit: 1, source: { soundcloud: "tracks" } });
-        if (!results?.length) {
+        if (!results?.length || !results[0]?.url) {
           return interaction.editReply('❌ Không tìm thấy bài SoundCloud phù hợp.');
         }
         url = results[0].url;
       }
+
       list.push(url);
       await SC.savePlaylists();
       return interaction.editReply(`✅ Đã thêm vào **${name}**:\n<${url}>`);
@@ -3423,8 +3423,10 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
     if (sub === 'view') {
       const name = interaction.options.getString('name', true);
       const page = interaction.options.getInteger('page') || 1;
-      const { key, list } = ensurePL(name);
-      if (list.length === 0) return interaction.reply(`(Trống) **${name}** chưa có bài.`);
+      const { list } = ensurePL(name);
+      if (list.length === 0) {
+        return interaction.reply({ content: `(Trống) **${name}** chưa có bài.`, ephemeral: true });
+      }
 
       const per = 10;
       const totalPages = Math.max(1, Math.ceil(list.length / per));
@@ -3443,33 +3445,50 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
       });
     }
 
-    // --- /playlist play name:xxx ---
-    if (sub === 'play') {
-      const name = interaction.options.getString('name', true);
-      const { key, list } = ensurePL(name);
-      if (list.length === 0) return interaction.reply(`(Trống) **${name}** chưa có bài.`);
+// --- /playlist add name:xxx q:<SC link hoặc từ khóa> ---
+if (sub === 'add') {
+  const name = interaction.options.getString('name', true);
+  const q    = interaction.options.getString('q', true);
+  const { list } = ensurePL(name);
 
-      const me = interaction.member;
-      const vch = me?.voice?.channel;
-      if (!vch) return interaction.reply({ content: '🎧 Vào voice channel trước đã!', ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
 
-      // kết nối voice
-      const state = SC.ensureGuildMusicSC(gid);
-      if (!state.connection) state.connection = await SC.connectToVoiceSC(vch).catch(e => null);
-      if (!state.connection) return interaction.reply('❌ Không kết nối được voice.');
+  let urls = [];
 
-      // thiết lập kênh text để thông báo “đang phát”
-      state.textChannelId = interaction.channelId;
-
-      // đẩy toàn bộ link vào queue
-      state.queue.push(...list);
-      await interaction.reply(`🎶 Đã xếp **${list.length}** bài từ **${name}** vào hàng đợi.`);
-
-      // bắt đầu phát nếu đang rảnh
-      SC.playNextSC(gid, client);
-      return;
+  if (/soundcloud\.com\/.*\/sets\//i.test(q)) {
+    // Nếu là link playlist SoundCloud
+    try {
+      const plInfo = await play.soundcloud(q);
+      if (plInfo?.tracks?.length) {
+        urls = plInfo.tracks.map(t => t.url);
+      }
+    } catch (e) {
+      console.error('SC playlist fetch error:', e);
     }
+  } else if (/soundcloud\.com\//i.test(q)) {
+    // Link 1 bài
+    urls = [q.trim()];
+  } else {
+    // Tìm kiếm theo từ khóa
+    const results = await play.search(q, { limit: 1, source: { soundcloud: "tracks" } });
+    if (!results?.length) {
+      return interaction.editReply('❌ Không tìm thấy bài SoundCloud phù hợp.');
+    }
+    urls = [results[0].url];
+  }
 
+  if (!urls.length) {
+    return interaction.editReply('❌ Không lấy được bài từ link/playlist.');
+  }
+
+  // Đẩy toàn bộ vào playlist
+  list.push(...urls);
+  await SC.savePlaylists();
+
+  return interaction.editReply(
+    `✅ Đã thêm **${urls.length}** bài vào **${name}**.`
+  );
+}   
     // --- /playlist shuffle name:xxx ---
     if (sub === 'shuffle') {
       const name = interaction.options.getString('name', true);
@@ -3497,7 +3516,30 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') 
     console.error('[playlist error]', e);
     return interaction.reply({ content: '❌ Có lỗi xảy ra với playlist.', ephemeral: true });
   }
-}  
+}
+
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  const [action, gid] = itx.customId.split(':');
+  if (!gid || itx.guildId !== gid) return;
+
+  const state = Music.get(gid);
+  if (!state) return itx.reply({ content: 'Không có phiên phát nhạc.', ephemeral: true }).catch(()=>{});
+
+  try {
+    if (action === 'sc_pause')  { state.player?.pause(true);   return itx.reply({ content: '⏸ Tạm dừng.', ephemeral: true }); }
+    if (action === 'sc_resume') { state.player?.unpause();     return itx.reply({ content: '▶️ Tiếp tục.', ephemeral: true }); }
+    if (action === 'sc_skip')   { state.player?.stop(true);    return itx.reply({ content: '⏭️ Bỏ qua.', ephemeral: true }); }
+    if (action === 'sc_stop')   {
+      state.queue = []; state.loop = false;
+      state.player?.stop(true);
+      try { state.connection?.destroy(); } catch {}
+      state.playing = false;
+      return itx.reply({ content: '⏹️ Dừng & rời kênh.', ephemeral: true });
+    }
+    if (action === 'sc_loop')   { state.loop = !state.loop;    return itx.reply({ content: state.loop ? '🔁 Bật lặp.' : '➡️ Tắt lặp.', ephemeral: true }); }
+  } catch {}
+});  
 });
 
 // ------------------- misc helpers -------------------
@@ -5000,80 +5042,115 @@ const SC = (() => {
     return playlists.guilds[gid];
   }
 
-  // --- queue per guild ---
-  const Music = new Map(); // gid -> { queue: string[], connection, player, playing, textChannelId }
+  // ====== SOUNDCloud music core (1 khối duy nhất) ======
+const Music = new Map(); // gid -> state
 
-  function ensureGuildMusicSC(gid) {
-    if (!Music.has(gid)) Music.set(gid, {
+function ensureGuildMusicSC(gid) {
+  if (!Music.has(gid)) {
+    Music.set(gid, {
       queue: [],
       connection: null,
       player: null,
       playing: false,
-      textChannelId: null
+      textChannelId: null,
+      current: null,
+      loop: false,
+      idleTimer: null,
     });
-    return Music.get(gid);
   }
+  return Music.get(gid);
+}
 
-  async function connectToVoiceSC(channel) {
-    const conn = joinVoiceChannel({
-      channelId: channel.id,
-      guildId: channel.guild.id,
-      adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: true
-    });
-    try {
-      await entersState(conn, VoiceConnectionStatus.Ready, 15_000);
-      return conn;
-    } catch (e) {
-      try { conn.destroy(); } catch {}
-      throw new Error('Không thể kết nối voice.');
-    }
+async function connectToVoiceSC(channel) {
+  const conn = joinVoiceChannel({
+    channelId: channel.id,
+    guildId: channel.guild.id,
+    adapterCreator: channel.guild.voiceAdapterCreator,
+    selfDeaf: true
+  });
+  try {
+    await entersState(conn, VoiceConnectionStatus.Ready, 15_000);
+    return conn;
+  } catch (e) {
+    try { conn.destroy(); } catch {}
+    throw new Error('Không thể kết nối voice.');
   }
+}
 
-  async function playNextSC(gid, client) {
-    const state = Music.get(gid);
-    if (!state || state.playing) return;
-    const url = state.queue.shift();
-    if (!url) return; // hết bài
+// === phát bài kế tiếp + gửi embed điều khiển ===
+async function playNextSC(gid, client) {
+  const state = Music.get(gid);
+  if (!state || state.playing) return;
 
-    if (!state.player) {
-      state.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
-      state.connection.subscribe(state.player);
-      state.player.on('error', (e) => {
-        console.warn('Player error:', e.message);
-        state.playing = false;
-        playNextSC(gid, client);
-      });
-      state.player.on(AudioPlayerStatus.Idle, () => {
-        state.playing = false;
-        playNextSC(gid, client);
-      });
-    }
-
-    try {
-      const s = await play.stream(url); // SoundCloud stream
-      const resource = createAudioResource(s.stream, { inputType: s.type });
-      state.playing = true;
-      state.player.play(resource);
-
-      if (state.textChannelId) {
-        const ch = await client.channels.fetch(state.textChannelId).catch(() => null);
-        if (ch?.isTextBased()) ch.send(`🎵 Đang phát: <${url}>`).catch(() => {});
-      }
-    } catch (e) {
-      console.warn('playNextSC stream error:', e?.message || e);
+  const url = state.queue.shift();
+  if (!url) {
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(() => {
+      try { state.player?.stop(); } catch {}
+      try { state.connection?.destroy(); } catch {}
       state.playing = false;
-      playNextSC(gid, client);
-    }
+      state.player = null; state.connection = null;
+    }, 120_000);
+    return;
   }
 
-  return {
-    loadPlaylists, savePlaylists, getGuildPL,
-    ensureGuildMusicSC, connectToVoiceSC, playNextSC,
-    Music
-  };
-})();
+  if (state.idleTimer) { clearTimeout(state.idleTimer); state.idleTimer = null; }
 
+  if (!state.player) {
+    state.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+    state.connection.subscribe(state.player);
+    state.player.on('error', () => { state.playing = false; playNextSC(gid, client); });
+    state.player.on(AudioPlayerStatus.Idle, () => {
+      state.playing = false;
+      if (state.loop && state.current) state.queue.unshift(state.current.url);
+      playNextSC(gid, client);
+    });
+  }
+
+  try {
+    let info = null;
+    try { info = await play.soundcloud(url); } catch {}
+    const title  = info?.name || 'SoundCloud Track';
+    const artist = info?.publisher || info?.user?.name || '';
+    const thumb  = info?.thumbnail || null;
+    const durSec = info?.durationInSec || null;
+
+    const s = await play.stream(url);
+    const resource = createAudioResource(s.stream, { inputType: s.type });
+
+    state.playing = true;
+    state.current = { url, title, artist, durSec, startedAt: Date.now() };
+    state.player.play(resource);
+
+    if (state.textChannelId) {
+      const ch = await client.channels.fetch(state.textChannelId).catch(() => null);
+      if (ch?.isTextBased()) {
+        const embed = new EmbedBuilder()
+          .setColor(0xff914d)
+          .setTitle(`🎵 ${title}`).setURL(url)
+          .setDescription(artist ? `👤 **${artist}**` : null)
+          .addFields({ name: '⏱ Thời lượng', value: durSec ? fmtDur(durSec) : '—', inline: true })
+          .setTimestamp(Date.now());
+        if (thumb) embed.setThumbnail(thumb);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`sc_pause:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('⏸️'),
+          new ButtonBuilder().setCustomId(`sc_resume:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('▶️'),
+          new ButtonBuilder().setCustomId(`sc_skip:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('⏭️'),
+          new ButtonBuilder().setCustomId(`sc_stop:${gid}`).setStyle(ButtonStyle.Danger).setEmoji('⏹️'),
+          new ButtonBuilder().setCustomId(`sc_loop:${gid}`).setStyle(state.loop ? ButtonStyle.Success : ButtonStyle.Secondary).setEmoji('🔁'),
+        );
+
+        await ch.send({ embeds: [embed], components: [row] }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    state.playing = false;
+    playNextSC(gid, client);
+  }
+}
+
+// ====== /SOUNDCloud music core ======
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

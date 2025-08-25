@@ -51,6 +51,12 @@ import {
 // ================== CapCut Auto (constants + helpers) ==================
 const CAPCUT_PROXY_BASE  = 'https://capcut-proxy.ytbprmvvdk10.workers.dev/proxy?u=';
 const CAPCUT_UPLOAD_LIMIT = 25 * 1024 * 1024; // 25MB
+// Helpers
+function isCapcutUrl_ccauto(s=''){ return /https?:\/\/(?:www\.)?(?:capcut\.com|capcut\.net)\/\S+/i.test(s); }
+function extractFirstUrl_ccauto(t=''){ const m=t.match(/https?:\/\/\S+/); return m?m[0]:''; }
+function safeName_ccauto(s){
+  return String(s||'').normalize('NFKD').replace(/[^\w\s-]/g,'').replace(/\s+/g,'_').slice(0,40);
+}
 
 // ===== Optional tokens
 if (process.env.YT_COOKIE) {
@@ -4793,47 +4799,59 @@ client.on('messageCreate', async (msg) => {
     await msg.reply({ embeds: [embed] });
 
     // --- Thử gửi video trực tiếp (không lộ link dài) ---
-    const chosen = pick;
-    if (!chosen || !/^https?:\/\//i.test(chosen.url)) return;
+const chosen = pick;
+if (!chosen || !/^https?:\/\//i.test(chosen.url)) return;
 
-    const fileBase = `capcut_${safeName_ccauto(meta.title || 'video')}`;
-    const ext = chosen.ext ? `.${chosen.ext}` : '.mp4';
-    const fileName = `${fileBase}${ext}`;
+const base = `capcut_${safeName_ccauto(meta.title || 'video')}`;
+const ext  = chosen.ext ? `.${chosen.ext}` : '.mp4';
+const fileName = `${base}${ext}`;
+const proxyUrl = CAPCUT_PROXY_BASE + encodeURIComponent(chosen.url);
 
-    // 1) Cho Discord tự tải lại từ URL (nhiều khi thành công luôn)
+// 1) Đính kèm trực tiếp từ VOD
+try {
+  await msg.reply({
+    files: [{ attachment: chosen.url, name: fileName }]
+  });
+  return;
+} catch (e1) {
+  // 2) Đính kèm trực tiếp từ proxy Worker
+  try {
+    await msg.reply({
+      files: [{ attachment: proxyUrl, name: fileName }]
+    });
+    return;
+  } catch (e2) {
+    // 3) Tải qua proxy -> re-upload (nếu <=25MB)
     try {
-      await msg.reply({ files: [{ attachment: chosen.url, name: fileName }] });
-      return;
-    } catch (e1) {
-      // 2) Dùng proxy Cloudflare để GET -> re-upload (nếu <= 25MB)
-      try {
-        const proxyUrl = CAPCUT_PROXY_BASE + encodeURIComponent(chosen.url);
-        const resp = await axios.get(proxyUrl, {
-          responseType: 'arraybuffer',
-          timeout: 25000,
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        const buf = Buffer.from(resp.data);
+      const resp = await axios.get(proxyUrl, {
+        responseType: 'arraybuffer',
+        timeout: 25000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      const buf = Buffer.from(resp.data);
 
-        if (buf.length > CAPCUT_UPLOAD_LIMIT) {
-          const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
-          await msg.reply({
-            content: '📦 Video lớn hơn giới hạn upload.',
-            components: rows.length ? rows : undefined
-          });
-        } else {
-          await msg.reply({ files: [{ attachment: buf, name: fileName }] });
-        }
-      } catch (e2) {
-        // 3) Cuối cùng: chỉ gửi nút (nếu URL quá dài, helper sẽ tự không add)
-        const proxyUrl = CAPCUT_PROXY_BASE + encodeURIComponent(chosen.url);
-        const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
+      if (buf.length <= CAPCUT_UPLOAD_LIMIT) {
         await msg.reply({
-          content: '⚠️ Không thể tải video tự động (CDN chặn).',
-          components: rows.length ? rows : undefined
+          files: [{ attachment: buf, name: fileName }]
         });
+        return;
       }
+
+      // 4) File > 25MB => gửi nút (chỉ add nút nếu URL <= 512)
+      const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
+      await msg.reply({
+        content: '📦 Video lớn hơn giới hạn upload.',
+        components: rows.length ? rows : undefined
+      });
+    } catch (e3) {
+      const rows = buildButtons_ccauto(proxyUrl, meta.originalUrl || url);
+      await msg.reply({
+        content: '⚠️ Không thể tải video tự động (CDN chặn).',
+        components: rows.length ? rows : undefined
+      });
     }
+  }
+}
   } catch (e) {
     console.error('[capcutauto] error:', e?.message || e);
   }

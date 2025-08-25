@@ -957,6 +957,75 @@ new SlashCommandBuilder()
       .setDescription('Xóa playlist')
       .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
   ),  
+
+new SlashCommandBuilder()
+  .setName('playlist')
+  .setDescription('Quản lý & phát playlist (SoundCloud)')
+  .addSubcommand(sc => 
+    sc.setName('create')
+      .setDescription('Tạo playlist mới cho server')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('add')
+      .setDescription('Thêm bài vào playlist (SoundCloud link / từ khoá / short link)')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+      .addStringOption(o => o.setName('q').setDescription('Link/từ khoá SoundCloud').setRequired(true))
+      .addIntegerOption(o =>
+        o.setName('limit')
+          .setDescription('Số bài tối đa lấy từ playlist (mặc định 50)')
+          .setMinValue(1).setMaxValue(200)
+      )
+  )
+  .addSubcommand(sc =>
+    sc.setName('view')
+      .setDescription('Xem playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+      .addIntegerOption(o => o.setName('page').setDescription('Trang').setMinValue(1))
+  )
+  .addSubcommand(sc =>
+    sc.setName('play')
+      .setDescription('Phát playlist vào voice')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('shuffle')
+      .setDescription('Xáo trộn playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('delete')
+      .setDescription('Xoá playlist')
+      .addStringOption(o => o.setName('name').setDescription('Tên playlist').setRequired(true))
+  ),
+
+new SlashCommandBuilder()
+  .setName('pet')
+  .setDescription('Nuôi thú ảo')
+  .addSubcommand(sc =>
+    sc.setName('adopt')
+      .setDescription('Nhận thú cưng mới')
+      .addStringOption(o => 
+        o.setName('name')
+          .setDescription('Tên thú cưng')
+          .setRequired(true))
+      .addStringOption(o =>
+        o.setName('species')
+          .setDescription('Loài (dog, cat, dragon, fox, panda, bunny)')
+      )
+  )
+  .addSubcommand(sc =>
+    sc.setName('profile')
+      .setDescription('Xem thú cưng của bạn')
+  )
+  .addSubcommand(sc =>
+    sc.setName('feed')
+      .setDescription('Cho thú ăn')
+  )
+  .addSubcommand(sc =>
+    sc.setName('play')
+      .setDescription('Chơi với thú')
+  ),  
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -3577,7 +3646,118 @@ client.on(Events.InteractionCreate, async (itx) => {
     }
     if (action === 'sc_loop')   { state.loop = !state.loop;    return itx.reply({ content: state.loop ? '🔁 Bật lặp.' : '➡️ Tắt lặp.', ephemeral: true }); }
   } catch {}
-});  
+}); 
+
+// ==== /pet handler ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
+  await loadPets();
+
+  const sub = interaction.options.getSubcommand();
+  const uid = interaction.user.id;
+
+  if (sub === 'adopt') {
+    const name = interaction.options.getString('name', true).trim().slice(0, 30);
+    const species = (interaction.options.getString('species') || 'dog').toLowerCase();
+
+    if (PetsDB.users[uid]) {
+      return interaction.reply({ content: '⚠️ Bạn đã có thú cưng rồi. Dùng `/pet profile` để xem.', ephemeral: true });
+    }
+
+    const pet = ensurePet(uid, { name, species });
+    await savePets();
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x00c48c)
+          .setTitle(`${petEmoji(pet.species)} Nhận nuôi thú cưng thành công!`)
+          .setDescription(`Tên: **${pet.name}**\nLoài: **${pet.species}**\nCấp: **${pet.level}**`)
+          .setFooter({ text: 'Dùng /pet feed và /pet play để chăm sóc nhé!' })
+      ]
+    });
+  }
+
+  if (sub === 'profile') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x4db6ff)
+      .setTitle(`${petEmoji(pet.species)} ${pet.name} (Lv.${pet.level})`)
+      .addFields(
+        { name: '❤️ HP', value: bar(pet.hp), inline: true },
+        { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+        { name: '😺 Vui', value: bar(pet.happy), inline: true },
+      )
+      .setFooter({ text: `EXP: ${pet.exp}/${pet.level * 100}` });
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (sub === 'feed') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
+
+    // cooldown 60s cho feed
+    const now = Date.now();
+    if (pet.lastFeed && now - pet.lastFeed < 60_000) {
+      const remain = Math.ceil((60_000 - (now - pet.lastFeed)) / 1000);
+      return interaction.reply({ content: `⏳ Hãy chờ ${remain}s rồi cho ăn tiếp nhé.`, ephemeral: true });
+    }
+
+    // hiệu ứng feed
+    pet.hunger = clamp(pet.hunger - 25, 0, 100);
+    pet.hp = clamp(pet.hp + 10, 0, 100);
+    gainExp(pet, 15);
+    pet.lastFeed = now;
+    await savePets();
+
+    return interaction.reply({
+      content: `${petEmoji(pet.species)} **${pet.name}** đã ăn no hơn! (+HP, +EXP)`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x8bc34a)
+          .addFields(
+            { name: '❤️ HP', value: bar(pet.hp), inline: true },
+            { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+            { name: '😺 Vui', value: bar(pet.happy), inline: true },
+          )
+      ]
+    });
+  }
+
+  if (sub === 'play') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
+
+    // cooldown 45s cho play
+    const now = Date.now();
+    if (pet.lastPlay && now - pet.lastPlay < 45_000) {
+      const remain = Math.ceil((45_000 - (now - pet.lastPlay)) / 1000);
+      return interaction.reply({ content: `⏳ Hãy chờ ${remain}s rồi chơi tiếp nhé.`, ephemeral: true });
+    }
+
+    // hiệu ứng play
+    pet.happy = clamp(pet.happy + 20, 0, 100);
+    pet.hunger = clamp(pet.hunger + 10, 0, 100); // chơi xong hơi đói hơn
+    gainExp(pet, 10);
+    pet.lastPlay = now;
+    await savePets();
+
+    return interaction.reply({
+      content: `🎮 Bạn chơi với **${pet.name}**. Nó trông rất vui! (+Vui, +EXP, hơi đói)`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xffca28)
+          .addFields(
+            { name: '❤️ HP', value: bar(pet.hp), inline: true },
+            { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+            { name: '😺 Vui', value: bar(pet.happy), inline: true },
+          )
+      ]
+    });
+  }
+}  
 });
 
 // ------------------- misc helpers -------------------
@@ -5233,6 +5413,80 @@ client.on(Events.InteractionCreate, async (itx) => {
     await itx.followUp({ content: '❌ Lỗi khi xử lý nút.', ephemeral: true }).catch(() => {});
   }
 });
+
+// ============== PET STORAGE ==============
+import fs from 'fs/promises';
+import path from 'path';
+
+const PETS_FILE = process.env.PETS_FILE || (process.platform === 'win32'
+  ? path.join(process.cwd(), 'pets.json')    // Windows local dev
+  : '/data/pets.json'                        // Railway Volume (khuyên dùng)
+);
+
+let PetsDB = { users: {} };
+
+async function loadPets() {
+  try {
+    const t = await fs.readFile(PETS_FILE, 'utf8');
+    PetsDB = JSON.parse(t || '{"users":{}}');
+  } catch {
+    PetsDB = { users: {} };
+  }
+}
+
+let _saveTimer = null;
+async function savePets() {
+  // debounce nhẹ để tránh ghi liên tục
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try {
+      await fs.writeFile(PETS_FILE, JSON.stringify(PetsDB, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('savePets error:', e?.message || e);
+    }
+  }, 300);
+}
+
+function ensurePet(uid, { name, species } = {}) {
+  if (!PetsDB.users[uid]) {
+    PetsDB.users[uid] = {
+      name: name || 'Pet',
+      species: species || 'dog',
+      level: 1,
+      exp: 0,
+      hp: 100,        // 0..100
+      hunger: 30,     // 0..100 (0 no, 100 đói)
+      happy: 50,      // 0..100
+      lastFeed: null,
+      lastPlay: null,
+      adoptedAt: Date.now()
+    };
+  }
+  return PetsDB.users[uid];
+}
+
+function gainExp(pet, amount = 10) {
+  pet.exp += amount;
+  const need = pet.level * 100;
+  if (pet.exp >= need) {
+    pet.exp -= need;
+    pet.level += 1;
+    pet.hp = Math.min(100, pet.hp + 10);
+  }
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function petEmoji(species='dog'){
+  const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
+  return map[species] || '🐾';
+}
+
+function bar(v) {
+  const fill = Math.round(clamp(v,0,100) / 10);
+  return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${clamp(v,0,100)}%`;
+}
+// ============ END PET STORAGE ============
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

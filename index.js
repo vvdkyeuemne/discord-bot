@@ -4050,17 +4050,52 @@ if (sub === 'guildwar') {
       : '⚠️ Boss hiện đang tồn tại, diệt xong rồi start lại nhé!');
   }
 
-  if (action === 'attack') {
-    if (!pet) return interaction.reply({ content:'Bạn chưa có pet, `/pet adopt` trước đã.', ephemeral:true });
-    const r = attackGuildWar(gid, pet, uid);      // <== tên mới
-    if (r.error) return interaction.reply({ content:r.error, ephemeral:true });
+   if (action === 'attack') {
+    const pet = ensurePet(uid);                          // luôn có pet hợp lệ
+    const res = attackBoss(gid, pet, uid);
+    if (res.error) return interaction.reply({ content: res.error, ephemeral: true });
 
+    // cộng thưởng
+    gainExp(pet, res.exp);
+    addCoins(pet, res.coins);
     await savePets();
-    return interaction.reply(
-      `⚔️ **${pet.name}** gây **${r.dmg}** sát thương. Boss còn **${r.hp}/${r.maxHP}** HP. (+${r.exp} EXP, +${r.coins} coins)` +
-      (r.ended ? '\n🏆 Boss đã bị hạ! GG mọi người!' : '')
-    );
+
+    // tên người tấn công
+    const member = await interaction.guild?.members.fetch(uid).catch(() => null);
+    const attacker = member?.displayName || interaction.user.username || pet.name;
+
+    // ép số an toàn để tránh NaN
+    const n = v => Math.max(0, Math.round(Number(v) || 0));
+    const dmg  = n(res.dmg);
+    const hp   = n(res.hp);
+    const mx   = n(res.maxHP);
+    const exp  = n(res.exp);
+    const coin = n(res.coins);
+
+    await interaction.reply(`⚔️ **${attacker}** gây **${dmg}** sát thương. Boss còn **${hp}/${mx}** HP. (+${exp} EXP, +${coin} coins)`);
+
+    if (res.ended) {
+      // hiển thị bảng đóng góp
+      const g = ensureGuild(gid);
+      const top = Object.entries(g.contrib || {})
+        .sort((a,b) => b[1]-a[1]).slice(0,5);
+      const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
+        const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
+        const name = m?.displayName || uid;
+        return `**${i+1}.** ${name} — ${dmg} dmg`;
+      }));
+      await interaction.followUp({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x90caf9)
+            .setTitle('🏁 Boss bị hạ!')
+            .setDescription(lines.length ? lines.join('\n') : 'Không có dữ liệu')
+        ]
+      }).catch(()=>{});
+    }
+    return;
   }
+}
 
   if (action === 'status') {
     const g = ensureGuildWar(gid);                // <== tên mới
@@ -5993,27 +6028,33 @@ export function startGuildWar(gid, hp = 1200) {
   return true;
 }
 
-export function attackGuildWar(gid, pet, uid) {
-  const g = ensureGuildWar(gid);
+export function attackBoss(gid, pet, uid) {
+  const g = ensureGuild(gid);
   if (!g.boss || g.boss.hp <= 0) {
     return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
   }
 
-  const base = pet.level * 6 + pet.happy * 0.3 + (100 - pet.hunger) * 0.2;
+  // ép kiểu an toàn
+  const lvl    = Number(pet?.level)  || 1;
+  const happy  = Number(pet?.happy)  || 50;
+  const hunger = Number(pet?.hunger) || 30;
+
+  // damage ngẫu nhiên theo chỉ số pet
+  const base = lvl * 6 + happy * 0.3 + (100 - hunger) * 0.2;
   const rand = Math.floor(Math.random() * 20);
   const dmg  = Math.max(5, Math.floor(base / 4) + rand);
 
-  g.boss.hp = Math.max(0, g.boss.hp - dmg);
-  g.contrib[uid] = (g.contrib[uid] || 0) + dmg;
+  g.boss.hp = Math.max(0, (Number(g.boss.hp) || 0) - dmg);
+  g.contrib[uid] = (Number(g.contrib[uid]) || 0) + dmg;
 
   const exp   = 10 + Math.floor(dmg / 6);
-  const coins = 5 + Math.floor(dmg / 10);
-  gainExp(pet, exp);
-  addCoins(pet, coins);
+  const coins = 5  + Math.floor(dmg / 10);
 
-  const ended = g.boss.hp <= 0;
-  if (ended) g.lastEnd = Date.now();
-
+  let ended = false;
+  if (g.boss.hp <= 0) {
+    ended = true;
+    g.lastEnd = Date.now();
+  }
   return { dmg, hp: g.boss.hp, maxHP: g.boss.maxHP, exp, coins, ended };
 }
 // ================== END PET STORAGE UTILS ==================

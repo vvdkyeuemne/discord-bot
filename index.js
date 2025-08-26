@@ -3455,10 +3455,20 @@ async function resolveSoundCloudUrl(url) {
   return url;
 }
 
-// ==== /admin handler (update: nền GIF + thumbnail tuỳ chỉnh) ====
+// ==== /admin handler (with requester + time) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
-  const THUMB_URL = "https://sv2.anhsieuviet.com/2025/08/26/1000005075.jpg"; // thumbnail
-  const BG_GIF    = "https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif"; // nền GIF (hiển thị dưới embed)
+  const THUMB_URL = "https://sv2.anhsieuviet.com/2025/08/26/1000005075.jpg";
+  const BG_GIF    = "https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif";
+
+  // tên người yêu cầu
+  const requester =
+    interaction.member?.displayName ||
+    interaction.user?.tag ||
+    interaction.user?.username ||
+    "Unknown";
+
+  // thời gian khu vực VN
+  const nowVN = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
 
   const embed = new EmbedBuilder()
     .setColor(0x00bcd4)
@@ -3468,15 +3478,18 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
       { name: "👤 Tên", value: "Võ Viết Duy Khiêm", inline: true },
       { name: "🚹 Giới tính", value: "Nam", inline: true },
       { name: "🎂 Năm sinh", value: "21/07/2007", inline: true },
-      { name: "🏡 Quê quán", value: "Điện Bàn, Đà Nẵng", inline: false },
+      { name: "🏡 Quê quán", value: "Đà Nẵng", inline: false },
       { name: "❤️ Mối quan hệ", value: "Độc thân", inline: false },
-      { name: "🎶 Sở thích", value: "Nghe nhạc", inline: false }
+      { name: "🎶 Sở thích", value: "Nghe nhạc", inline: false },
+      // thêm yêu cầu bởi + thời gian
+      { name: "🧑‍💻 Yêu cầu bởi", value: requester, inline: true },
+      { name: "🕒 Thời gian", value: nowVN, inline: true },
     )
-    .setThumbnail(THUMB_URL)  // thumbnail theo link bạn cung cấp
-    .setImage(BG_GIF)         // “nền” GIF sẽ hiện ngay dưới embed
-    .setFooter({ text: "Cảm ơn đã sử dụng bot! 💗" });
+    .setThumbnail(THUMB_URL)
+    .setImage(BG_GIF)
+    .setFooter({ text: "Cảm Ơn Bạn Đã Sử Dụng Bot! 💗" })
+    .setTimestamp(new Date()); // timestamp chuẩn của Discord
 
-  // Chỉ gửi embed, không đính kèm video/file nữa
   await interaction.reply({ embeds: [embed] });
 }  
 // ==== /playlist (SoundCloud) ====

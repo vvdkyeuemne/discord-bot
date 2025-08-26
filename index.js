@@ -5780,7 +5780,6 @@ async function loadWorkDB() {
   } catch { WorkDB = { users: {} }; }
 }
 
-let _saveTimer;
 async function saveWorkDB() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {

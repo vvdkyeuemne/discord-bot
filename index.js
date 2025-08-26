@@ -3665,45 +3665,45 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
   };
 
   // RANDOM GIFT (kích hoạt khi dùng bất kỳ lệnh pet)
-  const petBefore = ensurePet(uid);
+  ensureStable(uid);                       // chuẩn hoá cấu trúc nhiều pet
+  const petBefore = ensurePet(uid);        // pet active
   const gift = maybeRandomGift(petBefore);
   if (gift > 0) await savePets().then(() => {
     interaction.channel?.send(`🎁 **${petBefore.name}** tìm được ${gift} coin! (Số dư: ${petBefore.coins})`).catch(()=>{});
   });
 
-  // ----- adopt -----
+  // ----- adopt (đã cho phép nhiều pet, tối đa theo MAX_PETS) -----
   if (sub === 'adopt') {
     const name = interaction.options.getString('name', true).trim().slice(0, 30);
     const species = (interaction.options.getString('species') || 'dog').toLowerCase();
 
-    if (PetsDB.users[uid]) {
-      return interaction.reply({ content: '⚠️ Bạn đã có thú cưng rồi. Dùng `/pet profile` để xem.', ephemeral: true });
+    const res = adoptPet(uid, { name, species });
+    if (res.error) {
+      return interaction.reply({ content: `⚠️ ${res.error}`, ephemeral: true });
     }
-
-    const pet = ensurePet(uid, { name, species });
     await savePets();
 
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
           .setColor(0x00c48c)
-          .setTitle(`${petEmoji(pet.species)} Nhận nuôi thú cưng thành công!`)
-          .setDescription(`Tên: **${pet.name}**\nLoài: **${pet.species}**\nCấp: **${pet.level}**\nCoins: **${pet.coins}**`)
-          .setFooter({ text: 'Dùng /pet feed và /pet play để chăm sóc nhé!' })
+          .setTitle(`${petEmoji(res.pet.species)} Nhận nuôi thú cưng mới!`)
+          .setDescription(`ID: **${res.id}**\nTên: **${res.pet.name}**\nLoài: **${res.pet.species}**\nCấp: **${res.pet.level}**\nCoins: **${res.pet.coins}**`)
+          .setFooter({ text: 'Xem chuồng: /pet house • Đổi pet active: /pet house action:set id:<ID>' })
       ]
     });
   }
 
-  // ----- profile -----
+  // ----- profile (pet active) -----
   if (sub === 'profile') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
     return sendProfile(pet);
   }
 
   // ----- feed -----
   if (sub === 'feed') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
 
     const now = Date.now();
@@ -3716,9 +3716,11 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     pet.hp = clamp(pet.hp + 10, 0, 100);
     gainExp(pet, 15);
     pet.lastFeed = now;
+    pet.feeds = (pet.feeds || 0) + 1;
+    const unlock = checkAchievements(pet);
     await savePets();
 
-    return interaction.reply({
+    await interaction.reply({
       content: `${petEmoji(pet.species)} **${pet.name}** đã ăn no hơn! (+HP, +EXP)`,
       embeds: [
         new EmbedBuilder()
@@ -3730,11 +3732,13 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
           )
       ]
     });
+    if (unlock.length) interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
+    return;
   }
 
   // ----- play -----
   if (sub === 'play') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
 
     const now = Date.now();
@@ -3747,9 +3751,11 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     pet.hunger = clamp(pet.hunger + 10, 0, 100);
     gainExp(pet, 10);
     pet.lastPlay = now;
+    pet.plays = (pet.plays || 0) + 1;
+    const unlock = checkAchievements(pet);
     await savePets();
 
-    return interaction.reply({
+    await interaction.reply({
       content: `🎮 Bạn chơi với **${pet.name}**. Nó trông rất vui! (+Vui, +EXP, hơi đói)`,
       embeds: [
         new EmbedBuilder()
@@ -3761,17 +3767,19 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
           )
       ]
     });
+    if (unlock.length) interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
+    return;
   }
 
-  // ====== NEW 1) BATTLE ======
+  // ====== BATTLE ======
   if (sub === 'battle') {
     const target = interaction.options.getUser('opponent', true);
     if (target.bot) return interaction.reply({ content: 'Không đấu với bot nha 😅', ephemeral: true });
     if (target.id === uid) return interaction.reply({ content: 'Không thể tự đấu với chính mình.', ephemeral: true });
 
-    const me = PetsDB.users[uid];
-    const opp = PetsDB.users[target.id];
-    if (!me) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
+    const me = ensurePet(uid);
+    const opp = PetsDB.users[target.id] ? ensurePet(target.id) : null;
+    if (!me)  return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
     if (!opp) return interaction.reply({ content: `${target} chưa có pet. Bảo họ \`/pet adopt\` nha!`, ephemeral: true });
 
     const now = Date.now();
@@ -3781,11 +3789,9 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     }
     me.lastBattle = now;
 
-    // Chỉ số tấn công đơn giản
     const score = p => p.level * 10 + p.happy + (100 - p.hunger);
     const atk = (p) => Math.max(1, Math.floor(score(p) / 10)) + Math.floor(Math.random()*10);
 
-    // 3 hiệp
     let myPts = 0, opPts = 0;
     const rounds = [];
     for (let i=1;i<=3;i++){
@@ -3811,21 +3817,25 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       result = `🤝 Hoà! Mỗi bên +10 EXP.`;
       gainExp(me, 10); gainExp(opp, 10);
     }
+    me.battles = (me.battles || 0) + 1;
 
+    const unlockMe  = checkAchievements(me);
+    const unlockOpp = checkAchievements(opp);
     await savePets();
 
     const embed = new EmbedBuilder()
       .setColor(0xd1aaff)
       .setTitle(`⚔️ ${me.name} vs ${opp.name}`)
       .setDescription(rounds.join('\n'))
-      .addFields(
-        { name: 'Kết quả', value: result }
-      );
+      .addFields({ name: 'Kết quả', value: result });
 
-    return interaction.reply({ embeds: [embed] });
+    await interaction.reply({ embeds: [embed] });
+    if (unlockMe.length)  interaction.channel?.send(`🏅 **${me.name}** mở thành tựu: ${unlockMe.join(', ')}`).catch(()=>{});
+    if (unlockOpp.length) interaction.channel?.send(`🏅 **${opp.name}** mở thành tựu: ${unlockOpp.join(', ')}`).catch(()=>{});
+    return;
   }
 
-  // ====== NEW 2) SHOP ======
+  // ====== SHOP ======
   if (sub === 'shop') {
     const list = [
       { id:'food',        name:'🍖 Thức ăn',         price: 15, effect:'+no lớn, +hp nhỏ' },
@@ -3846,9 +3856,9 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     });
   }
 
-  // ====== NEW 3) BUY ======
+  // ====== BUY ======
   if (sub === 'buy') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
 
     const item = (interaction.options.getString('item', true) || '').toLowerCase();
@@ -3862,13 +3872,15 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     if (!it) return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
 
     if (!trySpendCoins(pet, it.price)) {
-    return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
-  }
+      return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
+    }
     it.use(pet);
     gainExp(pet, 8);
+    pet.itemsBought = (pet.itemsBought || 0) + 1;
+    const unlock = checkAchievements(pet);
     await savePets();
 
-    return interaction.reply({
+    await interaction.reply({
       content: `🛒 Đã mua **${item}** với giá ${it.price} coins. (Số dư: ${pet.coins})`,
       embeds: [
         new EmbedBuilder()
@@ -3881,15 +3893,20 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       ],
       ephemeral: true
     });
+    if (unlock.length) interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
+    return;
   }
 
-  // ====== NEW 4) TOP ======
+  // ====== TOP ======
   if (sub === 'top') {
     const entries = Object.entries(PetsDB.users || {});
     if (!entries.length) return interaction.reply('Chưa có ai nuôi pet cả :(');
 
     const sorted = entries
-      .map(([id, p]) => ({ id, ...p, score: p.level*1000 + p.exp }))
+      .map(([id, u]) => {
+        const p = (u.stable && u.activeId) ? u.stable[u.activeId] : u; // hỗ trợ dữ liệu mới/cũ
+        return { id, ...p, score: p.level*1000 + p.exp };
+      })
       .sort((a,b) => b.score - a.score)
       .slice(0, 10);
 
@@ -3908,9 +3925,10 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       ]
     });
   }
- // ====== ADVENTURE ======
+
+  // ====== ADVENTURE ======
   if (sub === 'adventure') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content:'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral:true });
 
     const now = Date.now();
@@ -3946,7 +3964,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
 
   // ====== ACHIEVEMENTS ======
   if (sub === 'achievements') {
-    const pet = PetsDB.users[uid];
+    const pet = ensurePet(uid);
     if (!pet) return interaction.reply({ content:'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral:true });
 
     const newly = checkAchievements(pet);
@@ -3968,7 +3986,8 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       ephemeral: true
     });
   }
-// ====== PET HOUSE ======
+
+  // ====== PET HOUSE ======
   if (sub === 'house') {
     const action = interaction.options.getString('action') || 'view';
     const id = interaction.options.getString('id') || '';
@@ -4016,6 +4035,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     return interaction.reply({ content: 'action không hợp lệ. Dùng: view | set | release', ephemeral: true });
   }
 
+  
 if (sub === 'guildwar') {
   const action = interaction.options.getString('action', true);
   const gid = interaction.guildId;

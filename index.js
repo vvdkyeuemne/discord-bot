@@ -980,8 +980,12 @@ new SlashCommandBuilder()
     .setDescription('Mua vật phẩm từ shop và dùng ngay')
     .addStringOption(o => o.setName('item')
       .setDescription('food | deluxe_food | toy | ball')
-      .setRequired(true))
-  ),  
+      .setRequired(true)))
+  .addSubcommand(sc => sc.setName('adventure').setDescription('Cho pet đi phiêu lưu (CD 2 phút)'))
+.addSubcommand(sc => sc.setName('achievements').setDescription('Xem các thành tựu đã mở'))
+  .addSubcommand(sc => sc.setName('top')
+  .setDescription('Xem bảng xếp hạng pet')
+),
 ].map(c=>c.toJSON());
 
 // ------------------- register guild commands -------------------
@@ -3869,6 +3873,66 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       ]
     });
   }
+ // ====== ADVENTURE ======
+  if (sub === 'adventure') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content:'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral:true });
+
+    const now = Date.now();
+    const CD = 120_000; // 2 phút
+    if (pet.lastAdventure && now - pet.lastAdventure < CD) {
+      const remain = Math.ceil((CD - (now - pet.lastAdventure))/1000);
+      return interaction.reply({ content:`⏳ Chờ ${remain}s nữa mới có thể phiêu lưu tiếp.`, ephemeral:true });
+    }
+    pet.lastAdventure = now;
+
+    await interaction.deferReply();
+    setTimeout(async () => {
+      const text = applyAdventure(pet);
+      const unlock = checkAchievements(pet);
+      await savePets();
+
+      const embed = new EmbedBuilder()
+        .setColor(0x7e57c2)
+        .setTitle(`🧭 Phiêu lưu của ${pet.name}`)
+        .setDescription(`Kết quả: **${text}**`)
+        .addFields(
+          { name:'❤️ HP',  value: bar(pet.hp),           inline:true },
+          { name:'🍗 No',  value: bar(100 - pet.hunger), inline:true },
+          { name:'😺 Vui', value: bar(pet.happy),        inline:true },
+        )
+        .setFooter({ text:`EXP: ${pet.exp}/${pet.level*100} • Coins: ${pet.coins}` });
+
+      await interaction.editReply({ embeds:[embed] }).catch(()=>{});
+      if (unlock.length) interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
+    }, 2000);
+    return;
+  }
+
+  // ====== ACHIEVEMENTS ======
+  if (sub === 'achievements') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content:'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral:true });
+
+    const newly = checkAchievements(pet);
+    if (newly.length) await savePets();
+
+    const all = pet.ach || {};
+    const list = Object.keys(all).filter(k => all[k]).length
+      ? Object.entries(all).filter(([k,v])=>v).map(([k])=>`• ${k}`).join('\n')
+      : '_Chưa có thành tựu nào._';
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x26a69a)
+          .setTitle(`🏅 Thành tựu của ${pet.name}`)
+          .setDescription(list)
+          .setFooter({ text: newly.length ? `Vừa mở: ${newly.join(', ')}` : 'Tiếp tục chăm tốt để mở thêm nhé!' })
+      ],
+      ephemeral: true
+    });
+  }
 }  
 });
 
@@ -5528,21 +5592,19 @@ client.on(Events.InteractionCreate, async (itx) => {
 
 // ==================== PET STORAGE UTILS ====================
 
-// Nơi lưu file dữ liệu
 export const PETS_FILE = process.env.PETS_FILE || (
   process.platform === 'win32'
     ? path.join(process.cwd(), 'pets.json') // Local Dev
     : '/data/pets.json'                     // Railway Volume
 );
 
-// DB trong RAM
 export let PetsDB = { users: {} };
 
 // --- Chuẩn hoá object pet ---
 export function normalizePet(p) {
   if (!p) return p;
-  p.name    = typeof p.name === 'string' && p.name ? p.name : 'Pet';
-  p.species = typeof p.species === 'string' && p.species ? p.species : 'dog';
+  p.name    = (typeof p.name === 'string' && p.name) ? p.name : 'Pet';
+  p.species = (typeof p.species === 'string' && p.species) ? p.species : 'dog';
   p.level   = Number.isFinite(p.level)   ? p.level   : 1;
   p.exp     = Number.isFinite(p.exp)     ? p.exp     : 0;
   p.hp      = Number.isFinite(p.hp)      ? p.hp      : 100;
@@ -5551,10 +5613,20 @@ export function normalizePet(p) {
   p.coins   = Number.isFinite(p.coins)   ? p.coins   : 0;
   p.wins    = Number.isFinite(p.wins)    ? p.wins    : 0;
   p.losses  = Number.isFinite(p.losses)  ? p.losses  : 0;
-  p.lastFeed   = p.lastFeed   || null;
-  p.lastPlay   = p.lastPlay   || null;
-  p.lastBattle = p.lastBattle || null;
-  p.adoptedAt  = p.adoptedAt  || Date.now();
+
+  // thống kê & thành tựu
+  p.feeds       = Number.isFinite(p.feeds)       ? p.feeds       : 0;
+  p.plays       = Number.isFinite(p.plays)       ? p.plays       : 0;
+  p.battles     = Number.isFinite(p.battles)     ? p.battles     : 0;
+  p.adventures  = Number.isFinite(p.adventures)  ? p.adventures  : 0;
+  p.itemsBought = Number.isFinite(p.itemsBought) ? p.itemsBought : 0;
+  p.ach         = (p.ach && typeof p.ach === 'object') ? p.ach : {};
+
+  p.lastFeed       = p.lastFeed       ?? null;
+  p.lastPlay       = p.lastPlay       ?? null;
+  p.lastBattle     = p.lastBattle     ?? null;
+  p.lastAdventure  = p.lastAdventure  ?? null;
+  p.adoptedAt      = p.adoptedAt      ?? Date.now();
   return p;
 }
 
@@ -5566,7 +5638,6 @@ export async function loadPets() {
   } catch {
     PetsDB = { users: {} };
   }
-  // chuẩn hoá toàn bộ pet đã lưu
   for (const uid of Object.keys(PetsDB.users || {})) {
     PetsDB.users[uid] = normalizePet(PetsDB.users[uid]);
   }
@@ -5599,9 +5670,16 @@ export function ensurePet(uid, { name, species } = {}) {
       coins: 0,
       wins: 0,
       losses: 0,
+      feeds: 0,
+      plays: 0,
+      battles: 0,
+      adventures: 0,
+      itemsBought: 0,
+      ach: {},
       lastFeed: null,
       lastPlay: null,
       lastBattle: null,
+      lastAdventure: null,
       adoptedAt: Date.now()
     };
   }
@@ -5618,7 +5696,7 @@ export function gainExp(pet, amount = 10) {
   }
 }
 
-// --- Helper nhỏ ---
+// --- Helpers nhỏ ---
 export function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 export function petEmoji(species = 'dog') {
@@ -5637,8 +5715,6 @@ export function addCoins(pet, amt) {
   pet.coins = Math.max(0, Math.round((pet.coins || 0) + amt));
   return pet.coins;
 }
-
-
 export function trySpendCoins(pet, cost = 0) {
   const cur = Math.round(pet.coins || 0);
   if (cur < cost) return false;
@@ -5652,11 +5728,59 @@ export function maybeRandomGift(pet) {
   if (Math.random() < CHANCE) {
     const gain = 3 + Math.floor(Math.random() * 8);
     addCoins(pet, gain);
-    return gain; // handler dùng để thông báo
+    return gain;
   }
   return 0;
 }
+
+// ===== Adventure (phiêu lưu) =====
+export const ADVENTURE_TABLE = [
+  { w: 25, text: 'nhặt được một túi coins!', coins:+15, exp:+20, happy:+10, hunger:+5 },
+  { w: 20, text: 'gặp bạn mới chơi vui đá bóng!', coins:+5,  exp:+15, happy:+20, hunger:+8 },
+  { w: 15, text: 'giúp cụ già qua đường, được khen!', coins:+8, exp:+25, happy:+12, hunger:+6, hp:+3 },
+  { w: 15, text: 'trượt chân té nhẹ...', coins:0,  exp:+10, happy:-5,  hunger:+5, hp:-5 },
+  { w: 15, text: 'tìm thấy thức ăn ngon!', coins:0,  exp:+15, happy:+10, hunger:-10 },
+  { w: 10, text: 'đánh bại con quái nhỏ 🐍!', coins:+12, exp:+30, happy:+8, hunger:+9, hp:-2 },
+];
+function _pickAdventure() {
+  const total = ADVENTURE_TABLE.reduce((a,b)=>a+b.w,0);
+  let r = Math.random() * total;
+  for (const o of ADVENTURE_TABLE) { if ((r -= o.w) <= 0) return o; }
+  return ADVENTURE_TABLE[0];
+}
+export function applyAdventure(pet) {
+  const o = _pickAdventure();
+  addCoins(pet, o.coins || 0);
+  if (o.exp)    gainExp(pet, Math.max(0, o.exp));
+  if (o.hp)     pet.hp     = clamp(pet.hp     + o.hp,     0, 100);
+  if (o.happy)  pet.happy  = clamp(pet.happy  + o.happy,  0, 100);
+  if (o.hunger) pet.hunger = clamp(pet.hunger + o.hunger, 0, 100);
+  pet.adventures = (pet.adventures || 0) + 1;
+  return o.text;
+}
+
+// ===== Achievements (thành tựu) =====
+export const ACH_RULES = [
+  { key:'lv5',         name:'Lên cấp 5',            test:p=>p.level>=5 },
+  { key:'lv10',        name:'Lên cấp 10',           test:p=>p.level>=10 },
+  { key:'win10',       name:'10 trận thắng',        test:p=>p.wins>=10 },
+  { key:'rich100',     name:'Đại gia 100 coins',    test:p=>p.coins>=100 },
+  { key:'adv5',        name:'Phiêu lưu 5 lần',      test:p=>p.adventures>=5 },
+  { key:'carePerfect', name:'Chăm sóc hoàn hảo',    test:p=>(p.hunger<=10 && p.happy>=90) },
+];
+export function checkAchievements(pet) {
+  const newly = [];
+  pet.ach = pet.ach || {};
+  for (const r of ACH_RULES) {
+    if (!pet.ach[r.key] && r.test(pet)) {
+      pet.ach[r.key] = true; newly.push(r.name);
+    }
+  }
+  return newly;
+}
+
 // ================== END PET STORAGE UTILS ==================
+
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

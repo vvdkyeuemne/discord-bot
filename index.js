@@ -4035,55 +4035,100 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     return interaction.reply({ content: 'action không hợp lệ. Dùng: view | set | release', ephemeral: true });
   }
 
-  
+// ====== GUILD WAR ======
 if (sub === 'guildwar') {
-  const action = interaction.options.getString('action', true);
+  const action = interaction.options.getString('action', true); // start | status | attack
   const gid = interaction.guildId;
-  const pet = PetsDB.users[uid];
 
+  // --- START: gọi boss mới ---
   if (action === 'start') {
-    const hp = interaction.options.getInteger('hp') ?? 1200;
-    const ok = startGuildWar(gid, hp);            // <== tên mới
+    const ok = startBoss(gid, 1200); // HP boss mặc định
     await savePets();
-    return interaction.reply(ok
-      ? `🛡️ Boss đã xuất hiện với **${hp} HP**! Dùng \`/pet guildwar attack\` để tấn công.`
-      : '⚠️ Boss hiện đang tồn tại, diệt xong rồi start lại nhé!');
+    if (!ok) {
+      const g = ensureGuild(gid);
+      return interaction.reply({
+        content: `⚠️ Boss đang hoạt động: **${Math.max(0, Math.round(Number(g.boss?.hp)||0))}/${Math.max(0, Math.round(Number(g.boss?.maxHP)||0))} HP**.\nDùng \`/pet guildwar attack\` để tấn công!`,
+        ephemeral: true
+      });
+    }
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x90caf9)
+          .setTitle('🛡️ Boss đã xuất hiện với 1200 HP!')
+          .setDescription('Dùng `/pet guildwar attack` để tấn công.')
+      ]
+    });
   }
 
-   if (action === 'attack') {
-    const pet = ensurePet(uid);                          // luôn có pet hợp lệ
-    const res = attackBoss(gid, pet, uid);
+  // --- STATUS: xem tình trạng boss + top đóng góp ---
+  if (action === 'status') {
+    const g = ensureGuild(gid);
+    if (!g.boss || (Number(g.boss.hp) || 0) <= 0) {
+      return interaction.reply('Hiện không có boss. Dùng `/pet guildwar start` để gọi boss.');
+    }
+
+    const cur = Math.max(0, Math.round(Number(g.boss.hp)    || 0));
+    const max = Math.max(0, Math.round(Number(g.boss.maxHP) || 0));
+
+    const top = Object.entries(g.contrib || {})
+      .sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0))
+      .slice(0, 5);
+
+    const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
+      const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
+      const name = m?.displayName || uid;
+      return `**${i+1}.** ${name} — ${Math.max(0, Math.round(Number(dmg)||0))} dmg`;
+    }));
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x90caf9)
+          .setTitle(`🛡️ Boss: ${cur}/${max} HP`)
+          .setDescription(lines.length ? `Top đóng góp:\n${lines.join('\n')}` : 'Top đóng góp:\n_Không có dữ liệu_')
+      ]
+    });
+  }
+
+  // --- ATTACK: tấn công boss ---
+  if (action === 'attack') {
+    const pet = ensurePet(uid);                    // luôn có pet hợp lệ
+    const res = attackBoss(gid, pet, uid);         // từ utils
     if (res.error) return interaction.reply({ content: res.error, ephemeral: true });
 
-    // cộng thưởng
+    // cộng thưởng cho người tấn công
     gainExp(pet, res.exp);
     addCoins(pet, res.coins);
     await savePets();
 
     // tên người tấn công
-    const member = await interaction.guild?.members.fetch(uid).catch(() => null);
+    const member   = await interaction.guild?.members.fetch(uid).catch(() => null);
     const attacker = member?.displayName || interaction.user.username || pet.name;
 
     // ép số an toàn để tránh NaN
-    const n = v => Math.max(0, Math.round(Number(v) || 0));
-    const dmg  = n(res.dmg);
-    const hp   = n(res.hp);
-    const mx   = n(res.maxHP);
-    const exp  = n(res.exp);
-    const coin = n(res.coins);
+    const n   = v => Math.max(0, Math.round(Number(v) || 0));
+    const dmg = n(res.dmg);
+    const hp  = n(res.hp);
+    const mx  = n(res.maxHP);
+    const xp  = n(res.exp);
+    const co  = n(res.coins);
 
-    await interaction.reply(`⚔️ **${attacker}** gây **${dmg}** sát thương. Boss còn **${hp}/${mx}** HP. (+${exp} EXP, +${coin} coins)`);
+    await interaction.reply(`⚔️ **${attacker}** gây **${dmg}** sát thương. Boss còn **${hp}/${mx}** HP. (+${xp} EXP, +${co} coins)`);
 
+    // nếu boss chết, in bảng xếp hạng
     if (res.ended) {
-      // hiển thị bảng đóng góp
       const g = ensureGuild(gid);
       const top = Object.entries(g.contrib || {})
-        .sort((a,b) => b[1]-a[1]).slice(0,5);
+        .sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0))
+        .slice(0, 5);
+
       const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
         const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
         const name = m?.displayName || uid;
-        return `**${i+1}.** ${name} — ${dmg} dmg`;
+        return `**${i+1}.** ${name} — ${Math.max(0, Math.round(Number(dmg)||0))} dmg`;
       }));
+
       await interaction.followUp({
         embeds: [
           new EmbedBuilder()
@@ -4096,21 +4141,9 @@ if (sub === 'guildwar') {
     return;
   }
 
-
-  if (action === 'status') {
-    const g = ensureGuildWar(gid);                // <== tên mới
-    if (!g.boss || g.boss.hp <= 0) return interaction.reply('Hiện không có boss.');
-    const top = Object.entries(g.contrib)
-      .sort((a,b)=>b[1]-a[1]).slice(0,5);
-    const lines = await Promise.all(top.map(async ([id,dmg],i)=>{
-      const user = await interaction.client.users.fetch(id).catch(()=>null);
-      return `**${i+1}.** ${user?.tag||id}: ${dmg}`;
-    }));
-    return interaction.reply(
-      `🛡️ Boss: **${g.boss.hp}/${g.boss.maxHP}** HP\nTop đóng góp:\n` + (lines.join('\n') || '_Không có dữ liệu_')
-    );
-  }
-}  
+  // fallback nếu action không hợp lệ
+  return interaction.reply({ content: 'Hành động không hợp lệ. Dùng `start`, `status` hoặc `attack`.', ephemeral: true });
+}    
 });
 
 // ------------------- misc helpers -------------------

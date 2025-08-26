@@ -2390,11 +2390,11 @@ embed.addFields({
 
 // ==== HELP CONFIG: gom nhóm lệnh theo tên (để render đẹp) ====
 const HELP_CATEGORIES = [
-  { key: 'auto',    title: '⚡ Tự động tải',     names: ['fbauto','instaauto','tiktokauto'] },
+  { key: 'auto',    title: '⚡ Tự động tải',     names: ['fbauto','instaauto','tiktokauto','capcutauto'] },
   { key: 'dl',      title: '📥 Downloader',     names: ['fb','insta','tiktok','news', 'capcut'] },
 
   // Music (tuỳ bot bạn đang có lệnh nào – để đủ phổ biến)
-  { key: 'music',   title: '🎵 Music',          names: ['join','play','playsc','skip','stop','pause','resume','queue','volume','npl'] },
+  { key: 'music',   title: '🎵 Music',          names: ['join','play','playsc','skip','stop','pause','resume','queue','volume','npl','playlist'] },
 
   // Welcome/Moderation (ví dụ – bạn có lệnh nào thì liệt kê)
   { key: 'welcome', title: '👋 Welcome',        names: ['setwelcome','disablewelcome','testwelcome'] },
@@ -2410,13 +2410,13 @@ const HELP_CATEGORIES = [
 // icon nhỏ trước từng tên lệnh (tuỳ chọn cho đẹp)
 function iconFor(name='') {
   const m = {
-    fb:'🅵', insta:'🅸', tiktok:'🆃', news:'📰',
-    fbauto:'⚡', instaauto:'⚡', tiktokauto:'⚡',
+    fb:'🅵', insta:'🅸', tiktok:'🆃', capcut:'🅲', news:'📰',
+    fbauto:'⚡', capcutauto: '⚡', instaauto:'⚡', tiktokauto:'⚡',
     play:'▶️', playsc:'🎵', join:'🔊', pause:'⏸️', resume:'▶️', skip:'⏭️', stop:'⏹️', queue:'📜', volume:'🔉', npl:'📜',
     roll:'🎲', '8ball':'🎱', ship:'💘', meme:'🖼️', guess:'🔢', leaderboard:'🏆', resetwins:'♻️',
     uptime:'⏱️', serverinfo:'🏠', profile:'🪪', botstats:'📊', invite:'🔗', weather:'⛅', avatar:'🖼️', purge:'🧹',
     setwelcome:'👋', disablewelcome:'🚫', testwelcome:'🧪',
-    sendnoti:'📣', devsync:'🔧',
+    sendnoti:'📣', devsync:'🔧', playlist:'🎵', pet:'🐾'
   };
   return m[name] || '•';
 }

@@ -3819,9 +3819,9 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     const it = shop[item];
     if (!it) return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
 
-    if (!spendCoins(pet, it.price)) {
-      return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
-    }
+    + if (!trySpendCoins(pet, it.price)) {
+    return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
+  }
     it.use(pet);
     gainExp(pet, 8);
     await savePets();
@@ -5524,8 +5524,6 @@ client.on(Events.InteractionCreate, async (itx) => {
 });
 
 // ==================== PET STORAGE UTILS ====================
-import fs from 'fs/promises';
-import path from 'path';
 
 // Nơi lưu file dữ liệu
 export const PETS_FILE = process.env.PETS_FILE || (

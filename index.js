@@ -3456,14 +3456,14 @@ async function resolveSoundCloudUrl(url) {
 }
 
 if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
-  const embed = new EmbedBuilder()
-        // giờ VN chuẩn (UTC+7)
+          // giờ VN chuẩn (UTC+7)
 const timeStr = new Intl.DateTimeFormat('vi-VN', {
   timeZone: 'Asia/Ho_Chi_Minh',
   hour: '2-digit',
   minute: '2-digit',
   hour12: false
 }).format(new Date());
+  const embed = new EmbedBuilder()
     .setColor(0x00aaff)
     .setTitle("👑 Thông tin Admin")
     .setDescription("Dưới đây là thông tin chi tiết của admin bot:")

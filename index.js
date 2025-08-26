@@ -924,6 +924,34 @@ new SlashCommandBuilder()
 new SlashCommandBuilder()
   .setName('admin')
   .setDescription('Xem thông tin admin bot'),
+
+  // /work
+new SlashCommandBuilder()
+  .setName('work')
+  .setDescription('Đi làm kiếm coins')
+  .addStringOption(o =>
+    o.setName('job')
+     .setDescription('Chọn công việc')
+     .addChoices(
+       { name: '🔧 Thợ sửa xe (Lv1+)',   value: 'mechanic' },
+       { name: '☕ Barista (Lv2+)',       value: 'barista' },
+       { name: '🚴 Shipper (Lv3+)',       value: 'shipper' },
+       { name: '🧰 Kỹ thuật viên (Lv4+)', value: 'technician' },
+       { name: '🎨 Designer (Lv5+)',      value: 'designer' },
+       { name: '💻 Dev freelance (Lv7+)', value: 'dev' },
+       { name: '🎥 Streamer (Lv9+)',      value: 'streamer' },
+     )
+  ),
+
+// /wallet
+new SlashCommandBuilder()
+  .setName('wallet')
+  .setDescription('Xem số dư coins của bạn'),
+
+// /jobs
+new SlashCommandBuilder()
+  .setName('jobs')
+  .setDescription('Danh sách công việc & điều kiện'),
   
 new SlashCommandBuilder()
   .setName('playlist')
@@ -3486,6 +3514,78 @@ const timeStr = new Intl.DateTimeFormat('vi-VN', {
 
   await interaction.reply({ embeds: [embed] });
 }  
+
+// ==== /work ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
+  await loadWorkDB();
+  const uid = interaction.user.id;
+  const acc = ensureAccount(uid);
+
+  const JOBS = [
+    { id:'mechanic', title:'🔧 Thợ sửa xe', req:1, min:12, max:22, exp:10 },
+    { id:'barista', title:'☕ Barista', req:2, min:14, max:26, exp:12 },
+    { id:'shipper', title:'🚴 Shipper', req:3, min:16, max:30, exp:14 },
+    { id:'technician', title:'🧰 Kỹ thuật viên', req:4, min:18, max:36, exp:16 },
+    { id:'designer', title:'🎨 Designer', req:5, min:22, max:45, exp:18 },
+    { id:'dev', title:'💻 Dev freelance', req:7, min:28, max:60, exp:20 },
+    { id:'streamer', title:'🎥 Streamer', req:9, min:35, max:80, exp:24 },
+  ];
+
+  const CD = 10*60*1000;
+  const now = Date.now();
+  if (acc.lastWork && acc.lastWork+CD > now) {
+    const wait = Math.ceil((acc.lastWork+CD-now)/60000);
+    return interaction.reply({ content:`⏳ Bạn cần chờ ${wait} phút nữa.`, ephemeral:true });
+  }
+
+  let job = JOBS.find(j=>j.id===interaction.options.getString('job')) 
+            || JOBS.filter(j=>acc.level>=j.req).pop();
+
+  const earn = job.min + Math.floor(Math.random()*(job.max-job.min+1));
+  addCoinsUser(acc, earn);
+  addExpUser(acc, job.exp);
+  acc.lastWork = now;
+  await saveWorkDB();
+
+  return interaction.reply({
+    embeds:[ new EmbedBuilder()
+      .setColor(0x4caf50)
+      .setTitle(`${job.title} — Ca làm xong!`)
+      .setDescription(`• Lương: **${fmtCoins(earn)}** coins\n• Tổng: **${fmtCoins(acc.coins)}** coins\n• Exp: ${acc.exp}/${acc.level*100} (Lv.${acc.level})`)
+      .setTimestamp(new Date())
+    ]
+  });
+}
+
+// ==== /wallet ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'wallet') {
+  await loadWorkDB();
+  const acc = ensureAccount(interaction.user.id);
+  return interaction.reply({ embeds:[ new EmbedBuilder()
+    .setColor(0x00bcd4)
+    .setTitle('💳 Ví của bạn')
+    .setDescription(`• Số dư: **${fmtCoins(acc.coins)}** coins\n• Level: ${acc.level} (${acc.exp}/${acc.level*100})`)
+  ], ephemeral:true });
+}
+
+// ==== /jobs ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'jobs') {
+  const JOBS = [
+    { id:'mechanic', title:'🔧 Thợ sửa xe', req:1, min:12, max:22 },
+    { id:'barista', title:'☕ Barista', req:2, min:14, max:26 },
+    { id:'shipper', title:'🚴 Shipper', req:3, min:16, max:30 },
+    { id:'technician', title:'🧰 Kỹ thuật viên', req:4, min:18, max:36 },
+    { id:'designer', title:'🎨 Designer', req:5, min:22, max:45 },
+    { id:'dev', title:'💻 Dev freelance', req:7, min:28, max:60 },
+    { id:'streamer', title:'🎥 Streamer', req:9, min:35, max:80 },
+  ];
+  const lines = JOBS.map(j=>`**${j.title}** — Lv.${j.req}+ • ${j.min}-${j.max} coins`).join('\n');
+  return interaction.reply({ embeds:[ new EmbedBuilder()
+    .setColor(0xff9800)
+    .setTitle('📋 Danh sách công việc')
+    .setDescription(lines)
+  ], ephemeral:true });
+}
 // ==== /playlist (SoundCloud) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;
@@ -5660,6 +5760,45 @@ client.on('messageCreate', async (msg) => {
     }
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
+
+// ===== utils work =====
+
+const WORK_FILE = process.env.WORK_FILE || (
+  process.platform === 'win32'
+    ? path.join(process.cwd(), 'work.json')
+    : '/data/work.json'
+);
+
+let WorkDB = { users: {} };
+
+function _nz(n, d=0){ n = Number(n); return Number.isFinite(n) ? n : d; }
+
+async function loadWorkDB() {
+  try {
+    const t = await fs.readFile(WORK_FILE, 'utf8');
+    WorkDB = JSON.parse(t || '{"users":{}}');
+  } catch { WorkDB = { users: {} }; }
+}
+
+let _saveTimer;
+async function saveWorkDB() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try { await fs.writeFile(WORK_FILE, JSON.stringify(WorkDB, null, 2)); }
+    catch(e){ console.warn('saveWorkDB error:', e?.message||e); }
+  }, 300);
+}
+
+function ensureAccount(uid) {
+  if (!WorkDB.users[uid]) WorkDB.users[uid] = { coins:0, level:1, exp:0, lastWork:0 };
+  return WorkDB.users[uid];
+}
+function addCoinsUser(u, amt){ u.coins = Math.max(0, Math.round(_nz(u.coins)+amt)); }
+function addExpUser(u, amt){
+  u.exp += amt;
+  while (u.exp >= u.level*100){ u.exp -= u.level*100; u.level++; }
+}
+function fmtCoins(n){ return _nz(n).toLocaleString('vi-VN'); }
 
 // ===== PLAYLIST STORE (persist to Railway volume) =====
 export const PLAYLISTS_FILE =

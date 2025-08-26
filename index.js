@@ -922,6 +922,10 @@ new SlashCommandBuilder()
   ),  
 
 new SlashCommandBuilder()
+  .setName('admin')
+  .setDescription('Xem thông tin admin bot'),
+  
+new SlashCommandBuilder()
   .setName('playlist')
   .setDescription('Quản lý & phát playlist (SoundCloud)')
   .addSubcommand(sc =>
@@ -3450,6 +3454,51 @@ async function resolveSoundCloudUrl(url) {
   }
   return url;
 }
+
+// ==== /admin handler ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
+  // avatar của người dùng đang gọi lệnh
+  const avatar = interaction.user.displayAvatarURL({ size: 512, extension: 'png' });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x00bcd4)
+    .setTitle("👑 Thông tin Admin")
+    .setDescription("Dưới đây là thông tin chi tiết của admin bot:")
+    .addFields(
+      { name: "👤 Tên", value: "Võ Viết Duy Khiêm", inline: true },
+      { name: "🚹 Giới tính", value: "Nam", inline: true },
+      { name: "🎂 Năm sinh", value: "21/07/2007", inline: true },
+      { name: "🏡 Quê quán", value: "Đà Nẵng", inline: false },
+      { name: "❤️ Mối quan hệ", value: "Độc thân", inline: false },
+      { name: "🎶 Sở thích", value: "Nghe nhạc", inline: false }
+    )
+    .setThumbnail(avatar)
+    .setFooter({ text: "Admin bot Zeref" });
+
+  const VIDEO_URL = "https://ik.imagekit.io/jogpzva8pm/snaptik_7529116479489445127_v2.mp4?updatedAt=1756206614363";
+  const fileName  = "admin_intro.mp4";
+
+  try {
+    // gửi embed + đính kèm video (Discord sẽ hiện player ngay dưới embed)
+    await interaction.reply({
+      embeds: [embed],
+      files: [{ attachment: VIDEO_URL, name: fileName }]
+    });
+  } catch (e) {
+    // fallback: nếu Discord/host chặn tải tệp trực tiếp → gửi embed + nút mở video
+    await interaction.reply({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel("🎥 Xem video admin")
+            .setStyle(ButtonStyle.Link)
+            .setURL(VIDEO_URL)
+        )
+      ]
+    });
+  }
+}  
 // ==== /playlist (SoundCloud) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;

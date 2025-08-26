@@ -4016,61 +4016,46 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     return interaction.reply({ content: 'action không hợp lệ. Dùng: view | set | release', ephemeral: true });
   }
 
-  // ====== GUILD WAR ======
-  if (sub === 'guildwar') {
-    if (!interaction.guildId) {
-      return interaction.reply({ content: 'Chỉ dùng trong server.', ephemeral: true });
-    }
-    const gwAction = interaction.options.getString('action', true); // start | attack | status
-    const guildId = interaction.guildId;
-    ensureGuild(guildId);
+if (sub === 'guildwar') {
+  const action = interaction.options.getString('action', true);
+  const gid = interaction.guildId;
+  const pet = PetsDB.users[uid];
 
-    if (gwAction === 'start') {
-      const hp = interaction.options.getInteger('hp') || 1200;
-      const started = startBoss(guildId, hp);
-      if (!started) return interaction.reply({ content: '⚠️ Boss đang tồn tại. Dùng `/pet guildwar action:status`.', ephemeral: true });
-      await savePets();
-      return interaction.reply(`🛡️ **Guild War** bắt đầu! Boss HP: **${hp}**. Dùng \`/pet guildwar action:attack\` để tham gia!`);
-    }
-
-    if (gwAction === 'attack') {
-      const pet = ensurePet(uid);
-      if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
-
-      const res = attackBoss(guildId, pet, uid);
-      if (res.error) return interaction.reply({ content: res.error, ephemeral: true });
-
-      gainExp(pet, res.exp);
-      addCoins(pet, res.coins);
-      await savePets();
-
-      const emb = new EmbedBuilder()
-        .setColor(0xef5350)
-        .setTitle('⚔️ Tấn công Boss!')
-        .setDescription(`Bạn gây **${res.dmg}** sát thương.\nBoss: ${res.hp}/${res.maxHP} HP\nThưởng: +${res.exp} EXP, +${res.coins} coins`)
-        .setFooter({ text: res.ended ? '🎉 Boss đã bị hạ!' : 'Tiếp tục tấn công nào!' });
-
-      return interaction.reply({ embeds: [emb] });
-    }
-
-    if (gwAction === 'status') {
-      const g = PetsDB.guilds[interaction.guildId];
-      if (!g || !g.boss || g.boss.hp <= 0) {
-        return interaction.reply('Chưa có boss. Dùng `/pet guildwar action:start` để khởi động.');
-      }
-      const top = Object.entries(g.contrib || {})
-        .sort((a,b)=>b[1]-a[1]).slice(0,10);
-      const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
-        const u = await interaction.client.users.fetch(uid).catch(()=>null);
-        return `**${i+1}.** ${u?.tag||uid} — ${dmg} dmg`;
-      }));
-      const emb = new EmbedBuilder()
-        .setColor(0xff7043)
-        .setTitle('🛡️ Guild Boss')
-        .setDescription(`HP: **${g.boss.hp}/${g.boss.maxHP}**\n\n**Top đóng góp:**\n${lines.join('\n') || '*Chưa có ai cả*'}`);
-      return interaction.reply({ embeds: [emb] });
-    }
+  if (action === 'start') {
+    const hp = interaction.options.getInteger('hp') ?? 1200;
+    const ok = startGuildWar(gid, hp);            // <== tên mới
+    await savePets();
+    return interaction.reply(ok
+      ? `🛡️ Boss đã xuất hiện với **${hp} HP**! Dùng \`/pet guildwar attack\` để tấn công.`
+      : '⚠️ Boss hiện đang tồn tại, diệt xong rồi start lại nhé!');
   }
+
+  if (action === 'attack') {
+    if (!pet) return interaction.reply({ content:'Bạn chưa có pet, `/pet adopt` trước đã.', ephemeral:true });
+    const r = attackGuildWar(gid, pet, uid);      // <== tên mới
+    if (r.error) return interaction.reply({ content:r.error, ephemeral:true });
+
+    await savePets();
+    return interaction.reply(
+      `⚔️ **${pet.name}** gây **${r.dmg}** sát thương. Boss còn **${r.hp}/${r.maxHP}** HP. (+${r.exp} EXP, +${r.coins} coins)` +
+      (r.ended ? '\n🏆 Boss đã bị hạ! GG mọi người!' : '')
+    );
+  }
+
+  if (action === 'status') {
+    const g = ensureGuildWar(gid);                // <== tên mới
+    if (!g.boss || g.boss.hp <= 0) return interaction.reply('Hiện không có boss.');
+    const top = Object.entries(g.contrib)
+      .sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const lines = await Promise.all(top.map(async ([id,dmg],i)=>{
+      const user = await interaction.client.users.fetch(id).catch(()=>null);
+      return `**${i+1}.** ${user?.tag||id}: ${dmg}`;
+    }));
+    return interaction.reply(
+      `🛡️ Boss: **${g.boss.hp}/${g.boss.maxHP}** HP\nTop đóng góp:\n` + (lines.join('\n') || '_Không có dữ liệu_')
+    );
+  }
+}  
 }  
 });
 
@@ -5972,32 +5957,39 @@ export function checkAchievements(pet) {
 }
 
 // ========= Guild War (boss chung) =========
-export function ensureGuild(gid) {
+export function ensureGuildWar(gid) {
+  PetsDB.guilds = PetsDB.guilds || {};
   if (!PetsDB.guilds[gid]) {
     PetsDB.guilds[gid] = { boss: null, contrib: {}, lastEnd: null };
   }
   return PetsDB.guilds[gid];
 }
-export function startBoss(gid, hp = 1200) {
-  const g = ensureGuild(gid);
-  if (g.boss && g.boss.hp > 0) return false;
+
+export function startGuildWar(gid, hp = 1200) {
+  const g = ensureGuildWar(gid);
+  if (g.boss && g.boss.hp > 0) return false;         // đang có boss
   g.boss = { hp, maxHP: hp, startedAt: Date.now() };
   g.contrib = {};
   return true;
 }
-export function attackBoss(gid, pet, uid) {
-  const g = ensureGuild(gid);
-  if (!g.boss || g.boss.hp <= 0) return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
+
+export function attackGuildWar(gid, pet, uid) {
+  const g = ensureGuildWar(gid);
+  if (!g.boss || g.boss.hp <= 0) {
+    return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
+  }
 
   const base = pet.level * 6 + pet.happy * 0.3 + (100 - pet.hunger) * 0.2;
   const rand = Math.floor(Math.random() * 20);
-  const dmg = Math.max(5, Math.floor(base / 4) + rand);
+  const dmg  = Math.max(5, Math.floor(base / 4) + rand);
 
   g.boss.hp = Math.max(0, g.boss.hp - dmg);
   g.contrib[uid] = (g.contrib[uid] || 0) + dmg;
 
-  const exp = 10 + Math.floor(dmg / 6);
+  const exp   = 10 + Math.floor(dmg / 6);
   const coins = 5 + Math.floor(dmg / 10);
+  gainExp(pet, exp);
+  addCoins(pet, coins);
 
   const ended = g.boss.hp <= 0;
   if (ended) g.lastEnd = Date.now();

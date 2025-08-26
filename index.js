@@ -5661,29 +5661,64 @@ client.on('messageCreate', async (msg) => {
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
 
-// ====== PLAYLIST STORE (file playlists.json) ======
-const PLAYLISTS_FILE = path.join(process.cwd(), 'playlists.json');
-let playlists = { guilds: {} };                 // bộ nhớ RAM
+// ===== PLAYLIST STORE (persist to Railway volume) =====
+export const PLAYLISTS_FILE =
+  process.env.PLAYLISTS_FILE ||
+  (process.platform === 'win32'
+    ? path.join(process.cwd(), 'playlists.json')  // Dev local
+    : '/data/playlists.json');                    // Railway volume
 
+// RAM snapshot
+let playlists = { guilds: {} };
+
+// --- normalize 1 guild playlist object ---
+function normalizeGuildPL(pl) {
+  const out = pl && typeof pl === 'object' ? pl : {};
+  out.name  = typeof out.name === 'string' ? out.name : 'Default';
+  out.items = Array.isArray(out.items) ? out.items : [];
+  // (tuỳ bạn có thêm các trường khác như current, loop...)
+  return out;
+}
+
+// --- load file -> RAM ---
 export async function loadPlaylists() {
   try {
     const t = await fs.readFile(PLAYLISTS_FILE, 'utf8');
-    playlists = JSON.parse(t || '{"guilds":{}}');
+    const obj = JSON.parse(t || '{"guilds":{}}');
+    playlists = { guilds: {} };
+    const src = obj.guilds || {};
+    for (const gid of Object.keys(src)) {
+      playlists.guilds[gid] = normalizeGuildPL(src[gid]);
+    }
   } catch {
+    // Chưa có file hoặc hỏng => dùng mặc định
     playlists = { guilds: {} };
   }
 }
+
+// --- debounced save (ghi nhẹ nhàng) ---
+let _plSaveTimer = null;
 export async function savePlaylists() {
-  try {
-    await fs.writeFile(PLAYLISTS_FILE, JSON.stringify(playlists, null, 2));
-  } catch (e) {
-    console.warn('savePlaylists error:', e?.message || e);
-  }
+  if (_plSaveTimer) clearTimeout(_plSaveTimer);
+  _plSaveTimer = setTimeout(async () => {
+    try {
+      // ghi tạm rồi rename để an toàn
+      const tmp = PLAYLISTS_FILE + '.tmp';
+      await fs.writeFile(tmp, JSON.stringify(playlists, null, 2), 'utf8');
+      await fs.rename(tmp, PLAYLISTS_FILE);
+    } catch (e) {
+      console.warn('savePlaylists error:', e?.message || e);
+    }
+  }, 300);
 }
+
+// --- get or create playlist bucket for a guild ---
 export function getGuildPL(gid) {
-  if (!playlists.guilds[gid]) playlists.guilds[gid] = {};
+  if (!playlists.guilds[gid]) {
+    playlists.guilds[gid] = normalizeGuildPL({});
+  }
   return playlists.guilds[gid];
-   }
+}
 
   // ====== SOUNDCloud music core (1 khối duy nhất) ======
 const Music = new Map(); // gid -> state

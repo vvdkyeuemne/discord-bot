@@ -3819,7 +3819,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     const it = shop[item];
     if (!it) return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
 
-    + if (!trySpendCoins(pet, it.price)) {
+    if (!trySpendCoins(pet, it.price)) {
     return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
   }
     it.use(pet);

@@ -5524,9 +5524,6 @@ client.on(Events.InteractionCreate, async (itx) => {
 });
 
 // ============== PET STORAGE (mở rộng) ==============
-import fs from 'fs/promises';
-import path from 'path';
-
 const PETS_FILE = process.env.PETS_FILE || (process.platform === 'win32'
   ? path.join(process.cwd(), 'pets.json')
   : '/data/pets.json'

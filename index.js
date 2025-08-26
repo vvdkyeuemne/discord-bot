@@ -4063,7 +4063,7 @@ if (sub === 'guildwar') {
 
   // --- STATUS: xem tình trạng boss + top đóng góp ---
   if (action === 'status') {
-    const g = ensureGuild(gid);
+    const g = ensureGuildWar(gid);
     if (!g.boss || (Number(g.boss.hp) || 0) <= 0) {
       return interaction.reply('Hiện không có boss. Dùng `/pet guildwar start` để gọi boss.');
     }
@@ -6045,7 +6045,7 @@ export function checkAchievements(pet) {
 }
 
 // ========= Guild War (boss chung theo server) =========
-export function ensureGuild(gid) {
+export function ensureGuildWar(gid) {
   if (!PetsDB.guilds) PetsDB.guilds = {};
   if (!PetsDB.guilds[gid]) {
     PetsDB.guilds[gid] = { boss: null, contrib: {}, lastEnd: null };

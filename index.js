@@ -35,6 +35,9 @@ import {
   TextInputStyle,
 } from 'discord.js';
 
+import { EventEmitter } from 'node:events';
+EventEmitter.defaultMaxListeners = 25;
+
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import * as play from 'play-dl';
 import * as gtrans from '@vitalets/google-translate-api';
@@ -5635,12 +5638,6 @@ export function addCoins(pet, amt) {
   return pet.coins;
 }
 
-export function trySpendCoins(pet, cost) {
-  const cur = Math.round(pet.coins || 0);
-  if (cur < cost) return false;
-  pet.coins = cur - cost;
-  return true;
-}
 
 // Cho/Trừ coin
 export function addCoins(pet, amt = 0) {

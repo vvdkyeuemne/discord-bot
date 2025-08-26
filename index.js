@@ -3457,6 +3457,13 @@ async function resolveSoundCloudUrl(url) {
 
 if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
   const embed = new EmbedBuilder()
+        // giờ VN chuẩn (UTC+7)
+const timeStr = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+}).format(new Date());
     .setColor(0x00aaff)
     .setTitle("👑 Thông tin Admin")
     .setDescription("Dưới đây là thông tin chi tiết của admin bot:")
@@ -3475,7 +3482,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
       { name: "💡 Trạng thái", value: "🚬 Đang Chán Đời..." }
     )
     .setImage("https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif")
-    .setFooter({ text: `Cảm Ơn Bạn Đã Sử Dụng Bot! 💗 | Hôm nay lúc ${new Date().toLocaleTimeString('vi-VN')}` });
+    .setFooter({ text: `Cảm Ơn Bạn Đã Sử Dụng Bot! 💗 | Hôm nay lúc ${timeStr}` });
 
   await interaction.reply({ embeds: [embed] });
 }  

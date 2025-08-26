@@ -4042,7 +4042,7 @@ if (sub === 'guildwar') {
 
   // --- START: gọi boss mới ---
   if (action === 'start') {
-    const ok = startGuildWar(gid, 1200); // HP boss mặc định
+    const ok = startBoss(gid, 1200); // HP boss mặc định
     await savePets();
     if (!ok) {
       const g = ensureGuild(gid);
@@ -6044,26 +6044,26 @@ export function checkAchievements(pet) {
   return newly;
 }
 
-// ========= Guild War (boss chung) =========
-export function ensureGuildWar(gid) {
-  PetsDB.guilds = PetsDB.guilds || {};
+// ========= Guild War (boss chung theo server) =========
+export function ensureGuild(gid) {
+  if (!PetsDB.guilds) PetsDB.guilds = {};
   if (!PetsDB.guilds[gid]) {
     PetsDB.guilds[gid] = { boss: null, contrib: {}, lastEnd: null };
   }
   return PetsDB.guilds[gid];
 }
 
-export function startGuildWar(gid, hp = 1200) {
-  const g = ensureGuildWar(gid);
-  if (g.boss && g.boss.hp > 0) return false;         // đang có boss
-  g.boss = { hp, maxHP: hp, startedAt: Date.now() };
+export function startBoss(gid, hp = 1200) {
+  const g = ensureGuild(gid);
+  if (g.boss && (Number(g.boss.hp) || 0) > 0) return false; // đã có boss còn sống
+  g.boss = { hp: Number(hp) || 1200, maxHP: Number(hp) || 1200, startedAt: Date.now() };
   g.contrib = {};
   return true;
 }
 
 export function attackBoss(gid, pet, uid) {
   const g = ensureGuild(gid);
-  if (!g.boss || g.boss.hp <= 0) {
+  if (!g.boss || (Number(g.boss.hp) || 0) <= 0) {
     return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
   }
 
@@ -6077,21 +6077,24 @@ export function attackBoss(gid, pet, uid) {
   const rand = Math.floor(Math.random() * 20);
   const dmg  = Math.max(5, Math.floor(base / 4) + rand);
 
-  g.boss.hp = Math.max(0, (Number(g.boss.hp) || 0) - dmg);
+  // trừ HP & cộng đóng góp (đều ép số)
+  const curHP = Math.max(0, Math.round(Number(g.boss.hp) || 0) - dmg);
+  g.boss.hp = curHP;
   g.contrib[uid] = (Number(g.contrib[uid]) || 0) + dmg;
 
+  // thưởng
   const exp   = 10 + Math.floor(dmg / 6);
   const coins = 5  + Math.floor(dmg / 10);
 
   let ended = false;
-  if (g.boss.hp <= 0) {
+  if (curHP <= 0) {
     ended = true;
     g.lastEnd = Date.now();
   }
-  return { dmg, hp: g.boss.hp, maxHP: g.boss.maxHP, exp, coins, ended };
-}
-// ================== END PET STORAGE UTILS ==================
 
+  return { dmg, hp: curHP, maxHP: Number(g.boss.maxHP) || 0, exp, coins, ended };
+}
+// ======== END Guild War utils ========
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

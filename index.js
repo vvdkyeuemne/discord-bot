@@ -5523,25 +5523,57 @@ client.on(Events.InteractionCreate, async (itx) => {
   }
 });
 
-// ============== PET STORAGE (mở rộng) ==============
-const PETS_FILE = process.env.PETS_FILE || (process.platform === 'win32'
-  ? path.join(process.cwd(), 'pets.json')
-  : '/data/pets.json'
+// ==================== PET STORAGE UTILS ====================
+import fs from 'fs/promises';
+import path from 'path';
+
+// Nơi lưu file dữ liệu
+export const PETS_FILE = process.env.PETS_FILE || (
+  process.platform === 'win32'
+    ? path.join(process.cwd(), 'pets.json') // Local Dev
+    : '/data/pets.json'                     // Railway Volume
 );
 
-let PetsDB = { users: {} };
+// DB trong RAM
+export let PetsDB = { users: {} };
 
-async function loadPets() {
+// --- Chuẩn hoá object pet ---
+export function normalizePet(p) {
+  if (!p) return p;
+  p.name    = typeof p.name === 'string' && p.name ? p.name : 'Pet';
+  p.species = typeof p.species === 'string' && p.species ? p.species : 'dog';
+  p.level   = Number.isFinite(p.level)   ? p.level   : 1;
+  p.exp     = Number.isFinite(p.exp)     ? p.exp     : 0;
+  p.hp      = Number.isFinite(p.hp)      ? p.hp      : 100;
+  p.hunger  = Number.isFinite(p.hunger)  ? p.hunger  : 30;
+  p.happy   = Number.isFinite(p.happy)   ? p.happy   : 50;
+  p.coins   = Number.isFinite(p.coins)   ? p.coins   : 0;
+  p.wins    = Number.isFinite(p.wins)    ? p.wins    : 0;
+  p.losses  = Number.isFinite(p.losses)  ? p.losses  : 0;
+  p.lastFeed   = p.lastFeed   || null;
+  p.lastPlay   = p.lastPlay   || null;
+  p.lastBattle = p.lastBattle || null;
+  p.adoptedAt  = p.adoptedAt  || Date.now();
+  return p;
+}
+
+// --- Nạp file -> RAM ---
+export async function loadPets() {
   try {
     const t = await fs.readFile(PETS_FILE, 'utf8');
     PetsDB = JSON.parse(t || '{"users":{}}');
   } catch {
     PetsDB = { users: {} };
   }
+  // chuẩn hoá toàn bộ pet đã lưu
+  for (const uid of Object.keys(PetsDB.users || {})) {
+    PetsDB.users[uid] = normalizePet(PetsDB.users[uid]);
+  }
 }
 
+// --- Lưu file (debounce) ---
 let _saveTimer = null;
-async function savePets() {
+export async function savePets() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
     try {
@@ -5552,64 +5584,66 @@ async function savePets() {
   }, 300);
 }
 
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function petEmoji(species='dog'){
-  const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
-  return map[species] || '🐾';
-}
-function bar(v) {
-  const fill = Math.round(clamp(v,0,100) / 10);
-  return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${clamp(v,0,100)}%`;
-}
-
-// >>> NEW: số dư & thành tích, cooldown
-function ensurePet(uid, { name, species } = {}) {
+// --- Tạo hoặc lấy pet ---
+export function ensurePet(uid, { name, species } = {}) {
   if (!PetsDB.users[uid]) {
     PetsDB.users[uid] = {
       name: name || 'Pet',
       species: (species || 'dog').toLowerCase(),
       level: 1,
       exp: 0,
-      hp: 100,      // 0..100
-      hunger: 30,   // 0..100 (0 no, 100 rất đói)
-      happy: 50,    // 0..100
-      coins: 50,    // >>> NEW: tiền khởi điểm
-      wins: 0,      // >>> NEW: thắng
-      losses: 0,    // >>> NEW: thua
+      hp: 100,
+      hunger: 30,
+      happy: 50,
+      coins: 0,
+      wins: 0,
+      losses: 0,
       lastFeed: null,
       lastPlay: null,
-      lastBattle: null, // >>> NEW: cooldown battle
+      lastBattle: null,
       adoptedAt: Date.now()
     };
   }
-  return PetsDB.users[uid];
+  return normalizePet(PetsDB.users[uid]);
 }
 
-function gainExp(pet, amount = 10) {
+// --- EXP & Level up ---
+export function gainExp(pet, amount = 10) {
   pet.exp += amount;
-  const need = pet.level * 100;
-  while (pet.exp >= need) {
-    pet.exp -= need;
+  while (pet.exp >= pet.level * 100) {
+    pet.exp -= pet.level * 100;
     pet.level += 1;
     pet.hp = Math.min(100, pet.hp + 10);
   }
 }
 
-// >>> NEW: coins helpers
-function addCoins(pet, n) { pet.coins = Math.max(0, (pet.coins || 0) + n); }
-function spendCoins(pet, n) { if ((pet.coins||0) < n) return false; pet.coins -= n; return true; }
+// --- Helper nhỏ ---
+export function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// >>> NEW: random event (quà nhỏ khi dùng lệnh pet)
-function maybeRandomGift(pet) {
-  // 12% tỉ lệ trúng quà
-  if (Math.random() < 0.12) {
-    const gift = 5 + Math.floor(Math.random() * 16); // 5..20
-    addCoins(pet, gift);
-    return gift;
-  }
-  return 0;
+export function petEmoji(species = 'dog') {
+  const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
+  return map[species] || '🐾';
 }
-// ============ END PET STORAGE ============
+
+export function bar(v) {
+  const vv = clamp(v, 0, 100);
+  const fill = Math.round(vv / 10);
+  return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${vv}%`;
+}
+
+// --- Coins helpers ---
+export function addCoins(pet, amt) {
+  pet.coins = Math.max(0, Math.round((pet.coins || 0) + amt));
+  return pet.coins;
+}
+
+export function trySpendCoins(pet, cost) {
+  const cur = Math.round(pet.coins || 0);
+  if (cur < cost) return false;
+  pet.coins = cur - cost;
+  return true;
+}
+// ================== END PET STORAGE UTILS ==================
 // ------------------ utils ------------------
 function fmtTime(sec) {
   if (isNaN(sec)) return "0:00";

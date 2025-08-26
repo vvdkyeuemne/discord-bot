@@ -984,7 +984,42 @@ new SlashCommandBuilder()
   .addSubcommand(sc => sc.setName('adventure').setDescription('Cho pet đi phiêu lưu (CD 2 phút)'))
 .addSubcommand(sc => sc.setName('achievements').setDescription('Xem các thành tựu đã mở'))
   .addSubcommand(sc => sc.setName('top')
-  .setDescription('Xem bảng xếp hạng pet')
+  .setDescription('Xem bảng xếp hạng pet'))
+  .addSubcommand(sc =>
+  sc.setName('house')
+    .setDescription('Quản lý chuồng pet (nhiều pet)')
+    .addStringOption(o =>
+      o.setName('action')
+       .setDescription('view | set | release')
+       .addChoices(
+         { name: 'view', value: 'view' },
+         { name: 'set', value: 'set' },
+         { name: 'release', value: 'release' }
+       )
+    )
+    .addStringOption(o =>
+      o.setName('id')
+       .setDescription('ID pet (khi set/release)')
+    )
+)
+.addSubcommand(sc =>
+  sc.setName('guildwar')
+    .setDescription('Sự kiện boss chung của server')
+    .addStringOption(o =>
+      o.setName('action')
+       .setDescription('start | attack | status')
+       .setRequired(true)
+       .addChoices(
+         { name: 'start',  value: 'start' },
+         { name: 'attack', value: 'attack' },
+         { name: 'status', value: 'status' }
+       )
+    )
+    .addIntegerOption(o =>
+      o.setName('hp')
+       .setDescription('HP boss khi start (mặc định 1200)')
+       .setMinValue(100)
+    )
 ),
 ].map(c=>c.toJSON());
 
@@ -3933,6 +3968,109 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
       ephemeral: true
     });
   }
+// ====== PET HOUSE ======
+  if (sub === 'house') {
+    const action = interaction.options.getString('action') || 'view';
+    const id = interaction.options.getString('id') || '';
+
+    ensureStable(uid);
+
+    if (action === 'view') {
+      const { list, activeId } = listPets(uid);
+      if (!list.length) return interaction.reply({ content: 'Bạn chưa có pet nào. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
+
+      const lines = list.map(p => {
+        const mark = (p.id === activeId) ? '🌟' : '—';
+        return `${mark} **${p.id}** • ${petEmoji(p.species)} **${p.name}** (Lv.${p.level})`;
+      }).join('\n');
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x90caf9)
+            .setTitle('🏠 Pet House')
+            .setDescription(lines)
+            .setFooter({ text: 'Đổi pet active: /pet house action:set id:<petId> • Thả tự do: action:release id:<petId>' })
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (action === 'set') {
+      const ok = setActivePet(uid, id);
+      if (!ok) return interaction.reply({ content: 'ID không hợp lệ hoặc bạn không sở hữu pet này.', ephemeral: true });
+      await savePets();
+      const pet = ensurePet(uid);
+      return interaction.reply(`✅ Đã đặt **${pet.name}** (${id}) làm pet active.`);
+    }
+
+    if (action === 'release') {
+      const res = releasePet(uid, id);
+      if (res.error) {
+        return interaction.reply({ content: res.error, ephemeral: true });
+      }
+      await savePets();
+      return interaction.reply(`🕊️ Đã thả tự do pet **${id}**.`);
+    }
+
+    return interaction.reply({ content: 'action không hợp lệ. Dùng: view | set | release', ephemeral: true });
+  }
+
+  // ====== GUILD WAR ======
+  if (sub === 'guildwar') {
+    if (!interaction.guildId) {
+      return interaction.reply({ content: 'Chỉ dùng trong server.', ephemeral: true });
+    }
+    const gwAction = interaction.options.getString('action', true); // start | attack | status
+    const guildId = interaction.guildId;
+    ensureGuild(guildId);
+
+    if (gwAction === 'start') {
+      const hp = interaction.options.getInteger('hp') || 1200;
+      const started = startBoss(guildId, hp);
+      if (!started) return interaction.reply({ content: '⚠️ Boss đang tồn tại. Dùng `/pet guildwar action:status`.', ephemeral: true });
+      await savePets();
+      return interaction.reply(`🛡️ **Guild War** bắt đầu! Boss HP: **${hp}**. Dùng \`/pet guildwar action:attack\` để tham gia!`);
+    }
+
+    if (gwAction === 'attack') {
+      const pet = ensurePet(uid);
+      if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
+
+      const res = attackBoss(guildId, pet, uid);
+      if (res.error) return interaction.reply({ content: res.error, ephemeral: true });
+
+      gainExp(pet, res.exp);
+      addCoins(pet, res.coins);
+      await savePets();
+
+      const emb = new EmbedBuilder()
+        .setColor(0xef5350)
+        .setTitle('⚔️ Tấn công Boss!')
+        .setDescription(`Bạn gây **${res.dmg}** sát thương.\nBoss: ${res.hp}/${res.maxHP} HP\nThưởng: +${res.exp} EXP, +${res.coins} coins`)
+        .setFooter({ text: res.ended ? '🎉 Boss đã bị hạ!' : 'Tiếp tục tấn công nào!' });
+
+      return interaction.reply({ embeds: [emb] });
+    }
+
+    if (gwAction === 'status') {
+      const g = PetsDB.guilds[interaction.guildId];
+      if (!g || !g.boss || g.boss.hp <= 0) {
+        return interaction.reply('Chưa có boss. Dùng `/pet guildwar action:start` để khởi động.');
+      }
+      const top = Object.entries(g.contrib || {})
+        .sort((a,b)=>b[1]-a[1]).slice(0,10);
+      const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
+        const u = await interaction.client.users.fetch(uid).catch(()=>null);
+        return `**${i+1}.** ${u?.tag||uid} — ${dmg} dmg`;
+      }));
+      const emb = new EmbedBuilder()
+        .setColor(0xff7043)
+        .setTitle('🛡️ Guild Boss')
+        .setDescription(`HP: **${g.boss.hp}/${g.boss.maxHP}**\n\n**Top đóng góp:**\n${lines.join('\n') || '*Chưa có ai cả*'}`);
+      return interaction.reply({ embeds: [emb] });
+    }
+  }
 }  
 });
 
@@ -5598,9 +5736,9 @@ export const PETS_FILE = process.env.PETS_FILE || (
     : '/data/pets.json'                     // Railway Volume
 );
 
-export let PetsDB = { users: {} };
+export let PetsDB = { users: {}, guilds: {} };
 
-// --- Chuẩn hoá object pet ---
+// --- Chuẩn hoá object pet (đơn lẻ) ---
 export function normalizePet(p) {
   if (!p) return p;
   p.name    = (typeof p.name === 'string' && p.name) ? p.name : 'Pet';
@@ -5630,7 +5768,7 @@ export function normalizePet(p) {
   return p;
 }
 
-// --- Nạp file -> RAM ---
+// --- Nạp file -> RAM + migrate ---
 export async function loadPets() {
   try {
     const t = await fs.readFile(PETS_FILE, 'utf8');
@@ -5638,8 +5776,9 @@ export async function loadPets() {
   } catch {
     PetsDB = { users: {} };
   }
+  if (!PetsDB.guilds) PetsDB.guilds = {};
   for (const uid of Object.keys(PetsDB.users || {})) {
-    PetsDB.users[uid] = normalizePet(PetsDB.users[uid]);
+    ensureStable(uid); // migrate về cấu trúc nhiều pet
   }
 }
 
@@ -5656,37 +5795,96 @@ export async function savePets() {
   }, 300);
 }
 
-// --- Tạo hoặc lấy pet ---
-export function ensurePet(uid, { name, species } = {}) {
-  if (!PetsDB.users[uid]) {
-    PetsDB.users[uid] = {
-      name: name || 'Pet',
-      species: (species || 'dog').toLowerCase(),
-      level: 1,
-      exp: 0,
-      hp: 100,
-      hunger: 30,
-      happy: 50,
-      coins: 0,
-      wins: 0,
-      losses: 0,
-      feeds: 0,
-      plays: 0,
-      battles: 0,
-      adventures: 0,
-      itemsBought: 0,
-      ach: {},
-      lastFeed: null,
-      lastPlay: null,
-      lastBattle: null,
-      lastAdventure: null,
-      adoptedAt: Date.now()
-    };
-  }
-  return normalizePet(PetsDB.users[uid]);
+// ========= PET HOUSE (nhiều pet) =========
+const MAX_PETS = 3;
+
+function createPet({ name='Pet', species='dog' } = {}) {
+  return normalizePet({
+    name, species: String(species||'dog').toLowerCase(),
+    level: 1, exp: 0, hp: 100, hunger: 30, happy: 50,
+    coins: 0, wins: 0, losses: 0,
+    lastFeed: null, lastPlay: null, lastBattle: null, lastAdventure: null,
+    adoptedAt: Date.now()
+  });
 }
 
-// --- EXP & Level up ---
+// đảm bảo user có { stable, activeId } và migrate dữ liệu cũ 1-pet
+export function ensureStable(uid) {
+  const u = PetsDB.users[uid];
+  if (!u) {
+    PetsDB.users[uid] = { stable: {}, activeId: null };
+    return PetsDB.users[uid];
+  }
+  if (!u.stable) {
+    // migrate old single-pet shape -> stable
+    const oldPet = normalizePet(u);
+    const id = 'p' + Date.now().toString(36).slice(-6);
+    PetsDB.users[uid] = { stable: { [id]: oldPet }, activeId: id };
+  }
+  // chuẩn hoá từng pet & đảm bảo activeId
+  for (const pid of Object.keys(PetsDB.users[uid].stable)) {
+    PetsDB.users[uid].stable[pid] = normalizePet(PetsDB.users[uid].stable[pid]);
+  }
+  if (!PetsDB.users[uid].activeId) {
+    PetsDB.users[uid].activeId = Object.keys(PetsDB.users[uid].stable)[0] || null;
+  }
+  return PetsDB.users[uid];
+}
+
+export function adoptPet(uid, { name, species } = {}) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  const count = Object.keys(st.stable).length;
+  if (count >= MAX_PETS) return { error: `Bạn đã đạt tối đa ${MAX_PETS} pet.` };
+  const id = 'p' + Math.random().toString(36).slice(2, 8);
+  st.stable[id] = createPet({ name, species });
+  if (!st.activeId) st.activeId = id;
+  return { id, pet: st.stable[id] };
+}
+
+export function listPets(uid) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  const list = Object.entries(st.stable).map(([id, p]) => ({ id, ...p }));
+  return { list, activeId: st.activeId };
+}
+
+export function getActivePet(uid) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  return st.stable[st.activeId] || null;
+}
+export function setActivePet(uid, id) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  if (!st.stable[id]) return false;
+  st.activeId = id;
+  return true;
+}
+export function releasePet(uid, id) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  if (!st.stable[id]) return { error: 'Không tìm thấy pet.' };
+  const keys = Object.keys(st.stable);
+  if (keys.length <= 1) return { error: 'Bạn chỉ còn 1 pet, không thể thả.' };
+  delete st.stable[id];
+  if (st.activeId === id) st.activeId = Object.keys(st.stable)[0] || null;
+  return { ok: true };
+}
+
+// ensurePet: trả về pet đang active (tương thích với code cũ)
+export function ensurePet(uid, { name, species } = {}) {
+  ensureStable(uid);
+  const st = PetsDB.users[uid];
+  if (!st.activeId) {
+    const { id, pet } = adoptPet(uid, { name, species });
+    st.activeId = id;
+    return pet;
+  }
+  return getActivePet(uid);
+}
+
+// ========= EXP & trợ giúp =========
 export function gainExp(pet, amount = 10) {
   pet.exp += amount;
   while (pet.exp >= pet.level * 100) {
@@ -5695,22 +5893,18 @@ export function gainExp(pet, amount = 10) {
     pet.hp = Math.min(100, pet.hp + 10);
   }
 }
-
-// --- Helpers nhỏ ---
 export function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
 export function petEmoji(species = 'dog') {
   const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
   return map[species] || '🐾';
 }
-
 export function bar(v) {
   const vv = clamp(v, 0, 100);
   const fill = Math.round(vv / 10);
   return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${vv}%`;
 }
 
-// --- Coins helpers ---
+// ========= Coins =========
 export function addCoins(pet, amt) {
   pet.coins = Math.max(0, Math.round((pet.coins || 0) + amt));
   return pet.coins;
@@ -5721,8 +5915,6 @@ export function trySpendCoins(pet, cost = 0) {
   pet.coins = cur - cost;
   return true;
 }
-
-// Tặng coin ngẫu nhiên mỗi lần dùng /pet (~15%, 3..10 coin)
 export function maybeRandomGift(pet) {
   const CHANCE = 0.15;
   if (Math.random() < CHANCE) {
@@ -5733,7 +5925,7 @@ export function maybeRandomGift(pet) {
   return 0;
 }
 
-// ===== Adventure (phiêu lưu) =====
+// ========= Adventure =========
 export const ADVENTURE_TABLE = [
   { w: 25, text: 'nhặt được một túi coins!', coins:+15, exp:+20, happy:+10, hunger:+5 },
   { w: 20, text: 'gặp bạn mới chơi vui đá bóng!', coins:+5,  exp:+15, happy:+20, hunger:+8 },
@@ -5759,7 +5951,7 @@ export function applyAdventure(pet) {
   return o.text;
 }
 
-// ===== Achievements (thành tựu) =====
+// ========= Achievements =========
 export const ACH_RULES = [
   { key:'lv5',         name:'Lên cấp 5',            test:p=>p.level>=5 },
   { key:'lv10',        name:'Lên cấp 10',           test:p=>p.level>=10 },
@@ -5779,6 +5971,39 @@ export function checkAchievements(pet) {
   return newly;
 }
 
+// ========= Guild War (boss chung) =========
+export function ensureGuild(gid) {
+  if (!PetsDB.guilds[gid]) {
+    PetsDB.guilds[gid] = { boss: null, contrib: {}, lastEnd: null };
+  }
+  return PetsDB.guilds[gid];
+}
+export function startBoss(gid, hp = 1200) {
+  const g = ensureGuild(gid);
+  if (g.boss && g.boss.hp > 0) return false;
+  g.boss = { hp, maxHP: hp, startedAt: Date.now() };
+  g.contrib = {};
+  return true;
+}
+export function attackBoss(gid, pet, uid) {
+  const g = ensureGuild(gid);
+  if (!g.boss || g.boss.hp <= 0) return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
+
+  const base = pet.level * 6 + pet.happy * 0.3 + (100 - pet.hunger) * 0.2;
+  const rand = Math.floor(Math.random() * 20);
+  const dmg = Math.max(5, Math.floor(base / 4) + rand);
+
+  g.boss.hp = Math.max(0, g.boss.hp - dmg);
+  g.contrib[uid] = (g.contrib[uid] || 0) + dmg;
+
+  const exp = 10 + Math.floor(dmg / 6);
+  const coins = 5 + Math.floor(dmg / 10);
+
+  const ended = g.boss.hp <= 0;
+  if (ended) g.lastEnd = Date.now();
+
+  return { dmg, hp: g.boss.hp, maxHP: g.boss.maxHP, exp, coins, ended };
+}
 // ================== END PET STORAGE UTILS ==================
 
 // ------------------ utils ------------------

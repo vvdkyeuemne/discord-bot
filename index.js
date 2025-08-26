@@ -961,29 +961,23 @@ new SlashCommandBuilder()
 new SlashCommandBuilder()
   .setName('pet')
   .setDescription('Nuôi thú ảo')
-  .addSubcommand(sc =>
-    sc.setName('adopt')
-      .setDescription('Nhận thú cưng mới')
-      .addStringOption(o => 
-        o.setName('name')
-          .setDescription('Tên thú cưng')
-          .setRequired(true))
-      .addStringOption(o =>
-        o.setName('species')
-          .setDescription('Loài (dog, cat, dragon, fox, panda, bunny)')
-      )
-  )
-  .addSubcommand(sc =>
-    sc.setName('profile')
-      .setDescription('Xem thú cưng của bạn')
-  )
-  .addSubcommand(sc =>
-    sc.setName('feed')
-      .setDescription('Cho thú ăn')
-  )
-  .addSubcommand(sc =>
-    sc.setName('play')
-      .setDescription('Chơi với thú')
+  .addSubcommand(sc => sc.setName('adopt')
+    .setDescription('Nhận thú cưng mới')
+    .addStringOption(o => o.setName('name').setDescription('Tên thú cưng').setRequired(true))
+    .addStringOption(o => o.setName('species').setDescription('Loài (dog, cat, dragon, fox, panda, bunny)')))
+  .addSubcommand(sc => sc.setName('profile').setDescription('Xem thú cưng của bạn'))
+  .addSubcommand(sc => sc.setName('feed').setDescription('Cho thú ăn'))
+  .addSubcommand(sc => sc.setName('play').setDescription('Chơi với thú'))
+  // >>> NEW
+  .addSubcommand(sc => sc.setName('battle')
+    .setDescription('Đấu pet với người khác')
+    .addUserOption(o => o.setName('opponent').setDescription('Đối thủ').setRequired(true)))
+  .addSubcommand(sc => sc.setName('shop').setDescription('Xem cửa hàng'))
+  .addSubcommand(sc => sc.setName('buy')
+    .setDescription('Mua vật phẩm từ shop và dùng ngay')
+    .addStringOption(o => o.setName('item')
+      .setDescription('food | deluxe_food | toy | ball')
+      .setRequired(true))
   ),  
 ].map(c=>c.toJSON());
 
@@ -3614,6 +3608,28 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
   const sub = interaction.options.getSubcommand();
   const uid = interaction.user.id;
 
+  // helper gửi embed profile (tái dùng)
+  const sendProfile = (pet, replyFn = (x)=>interaction.reply(x)) => {
+    const embed = new EmbedBuilder()
+      .setColor(0x4db6ff)
+      .setTitle(`${petEmoji(pet.species)} ${pet.name} (Lv.${pet.level})`)
+      .addFields(
+        { name: '❤️ HP', value: bar(pet.hp), inline: true },
+        { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+        { name: '😺 Vui', value: bar(pet.happy), inline: true },
+      )
+      .setFooter({ text: `EXP: ${pet.exp}/${pet.level * 100} • Coins: ${pet.coins} • W:${pet.wins} L:${pet.losses}` });
+    return replyFn({ embeds: [embed] });
+  };
+
+  // RANDOM GIFT (kích hoạt khi dùng bất kỳ lệnh pet)
+  const petBefore = ensurePet(uid);
+  const gift = maybeRandomGift(petBefore);
+  if (gift > 0) await savePets().then(() => {
+    interaction.channel?.send(`🎁 **${petBefore.name}** tìm được ${gift} coin! (Số dư: ${petBefore.coins})`).catch(()=>{});
+  });
+
+  // ----- adopt -----
   if (sub === 'adopt') {
     const name = interaction.options.getString('name', true).trim().slice(0, 30);
     const species = (interaction.options.getString('species') || 'dog').toLowerCase();
@@ -3630,41 +3646,30 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
         new EmbedBuilder()
           .setColor(0x00c48c)
           .setTitle(`${petEmoji(pet.species)} Nhận nuôi thú cưng thành công!`)
-          .setDescription(`Tên: **${pet.name}**\nLoài: **${pet.species}**\nCấp: **${pet.level}**`)
+          .setDescription(`Tên: **${pet.name}**\nLoài: **${pet.species}**\nCấp: **${pet.level}**\nCoins: **${pet.coins}**`)
           .setFooter({ text: 'Dùng /pet feed và /pet play để chăm sóc nhé!' })
       ]
     });
   }
 
+  // ----- profile -----
   if (sub === 'profile') {
     const pet = PetsDB.users[uid];
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
-
-    const embed = new EmbedBuilder()
-      .setColor(0x4db6ff)
-      .setTitle(`${petEmoji(pet.species)} ${pet.name} (Lv.${pet.level})`)
-      .addFields(
-        { name: '❤️ HP', value: bar(pet.hp), inline: true },
-        { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
-        { name: '😺 Vui', value: bar(pet.happy), inline: true },
-      )
-      .setFooter({ text: `EXP: ${pet.exp}/${pet.level * 100}` });
-
-    return interaction.reply({ embeds: [embed] });
+    return sendProfile(pet);
   }
 
+  // ----- feed -----
   if (sub === 'feed') {
     const pet = PetsDB.users[uid];
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
 
-    // cooldown 60s cho feed
     const now = Date.now();
     if (pet.lastFeed && now - pet.lastFeed < 60_000) {
       const remain = Math.ceil((60_000 - (now - pet.lastFeed)) / 1000);
       return interaction.reply({ content: `⏳ Hãy chờ ${remain}s rồi cho ăn tiếp nhé.`, ephemeral: true });
     }
 
-    // hiệu ứng feed
     pet.hunger = clamp(pet.hunger - 25, 0, 100);
     pet.hp = clamp(pet.hp + 10, 0, 100);
     gainExp(pet, 15);
@@ -3685,20 +3690,19 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     });
   }
 
+  // ----- play -----
   if (sub === 'play') {
     const pet = PetsDB.users[uid];
     if (!pet) return interaction.reply({ content: 'Bạn chưa có thú cưng. Dùng `/pet adopt` để nhận nuôi.', ephemeral: true });
 
-    // cooldown 45s cho play
     const now = Date.now();
     if (pet.lastPlay && now - pet.lastPlay < 45_000) {
       const remain = Math.ceil((45_000 - (now - pet.lastPlay)) / 1000);
       return interaction.reply({ content: `⏳ Hãy chờ ${remain}s rồi chơi tiếp nhé.`, ephemeral: true });
     }
 
-    // hiệu ứng play
     pet.happy = clamp(pet.happy + 20, 0, 100);
-    pet.hunger = clamp(pet.hunger + 10, 0, 100); // chơi xong hơi đói hơn
+    pet.hunger = clamp(pet.hunger + 10, 0, 100);
     gainExp(pet, 10);
     pet.lastPlay = now;
     await savePets();
@@ -3713,6 +3717,152 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
             { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
             { name: '😺 Vui', value: bar(pet.happy), inline: true },
           )
+      ]
+    });
+  }
+
+  // ====== NEW 1) BATTLE ======
+  if (sub === 'battle') {
+    const target = interaction.options.getUser('opponent', true);
+    if (target.bot) return interaction.reply({ content: 'Không đấu với bot nha 😅', ephemeral: true });
+    if (target.id === uid) return interaction.reply({ content: 'Không thể tự đấu với chính mình.', ephemeral: true });
+
+    const me = PetsDB.users[uid];
+    const opp = PetsDB.users[target.id];
+    if (!me) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
+    if (!opp) return interaction.reply({ content: `${target} chưa có pet. Bảo họ \`/pet adopt\` nha!`, ephemeral: true });
+
+    const now = Date.now();
+    if (me.lastBattle && now - me.lastBattle < 60_000) {
+      const remain = Math.ceil((60_000 - (now - me.lastBattle)) / 1000);
+      return interaction.reply({ content: `⏳ Chờ ${remain}s nữa hãy thách đấu.`, ephemeral: true });
+    }
+    me.lastBattle = now;
+
+    // Chỉ số tấn công đơn giản
+    const score = p => p.level * 10 + p.happy + (100 - p.hunger);
+    const atk = (p) => Math.max(1, Math.floor(score(p) / 10)) + Math.floor(Math.random()*10);
+
+    // 3 hiệp
+    let myPts = 0, opPts = 0;
+    const rounds = [];
+    for (let i=1;i<=3;i++){
+      const a = atk(me), b = atk(opp);
+      if (a >= b) { myPts++; rounds.push(`Hiệp ${i}: bạn **${a}** vs ${b}`); }
+      else { opPts++; rounds.push(`Hiệp ${i}: bạn ${a} vs **${b}**`); }
+    }
+
+    let result = '';
+    if (myPts > opPts) {
+      me.wins++; opp.losses++;
+      gainExp(me, 25);
+      addCoins(me, 15);
+      me.hunger = clamp(me.hunger + 8, 0, 100);
+      opp.hunger = clamp(opp.hunger + 5, 0, 100);
+      result = `🏆 **${me.name}** thắng! (+25 EXP, +15 coins)`;
+    } else if (myPts < opPts) {
+      me.losses++; opp.wins++;
+      gainExp(opp, 20);
+      addCoins(opp, 10);
+      result = `😿 **${me.name}** thua rồi… (đối thủ nhận +20 EXP, +10 coins)`;
+    } else {
+      result = `🤝 Hoà! Mỗi bên +10 EXP.`;
+      gainExp(me, 10); gainExp(opp, 10);
+    }
+
+    await savePets();
+
+    const embed = new EmbedBuilder()
+      .setColor(0xd1aaff)
+      .setTitle(`⚔️ ${me.name} vs ${opp.name}`)
+      .setDescription(rounds.join('\n'))
+      .addFields(
+        { name: 'Kết quả', value: result }
+      );
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  // ====== NEW 2) SHOP ======
+  if (sub === 'shop') {
+    const list = [
+      { id:'food',        name:'🍖 Thức ăn',         price: 15, effect:'+no lớn, +hp nhỏ' },
+      { id:'deluxe_food', name:'🍱 Hộp thượng hạng', price: 40, effect:'no rất nhiều, +hp tốt' },
+      { id:'toy',         name:'🧸 Đồ chơi',         price: 20, effect:'+vui nhiều, hơi đói' },
+      { id:'ball',        name:'⚽️ Quả bóng',        price: 10, effect:'+vui vừa' }
+    ];
+    const desc = list.map(i => `**${i.id}** — ${i.name} • ${i.price} coins • _${i.effect}_`).join('\n');
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x9ccc65)
+          .setTitle('🛒 Cửa hàng Pet')
+          .setDescription(desc)
+          .setFooter({ text: 'Mua dùng ngay: /pet buy item:<id>' })
+      ],
+      ephemeral: true
+    });
+  }
+
+  // ====== NEW 3) BUY ======
+  if (sub === 'buy') {
+    const pet = PetsDB.users[uid];
+    if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
+
+    const item = (interaction.options.getString('item', true) || '').toLowerCase();
+    const shop = {
+      'food':        { price:15, use:(p)=>{ p.hunger=clamp(p.hunger-35,0,100); p.hp=clamp(p.hp+5,0,100); } },
+      'deluxe_food': { price:40, use:(p)=>{ p.hunger=clamp(p.hunger-60,0,100); p.hp=clamp(p.hp+15,0,100);} },
+      'toy':         { price:20, use:(p)=>{ p.happy=clamp(p.happy+30,0,100); p.hunger=clamp(p.hunger+8,0,100);} },
+      'ball':        { price:10, use:(p)=>{ p.happy=clamp(p.happy+18,0,100);} },
+    };
+    const it = shop[item];
+    if (!it) return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
+
+    if (!spendCoins(pet, it.price)) {
+      return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
+    }
+    it.use(pet);
+    gainExp(pet, 8);
+    await savePets();
+
+    return interaction.reply({
+      content: `🛒 Đã mua **${item}** với giá ${it.price} coins. (Số dư: ${pet.coins})`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x80cbc4)
+          .addFields(
+            { name: '❤️ HP', value: bar(pet.hp), inline: true },
+            { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+            { name: '😺 Vui', value: bar(pet.happy), inline: true },
+          )
+      ],
+      ephemeral: true
+    });
+  }
+
+  // ====== NEW 4) TOP ======
+  if (sub === 'top') {
+    const entries = Object.entries(PetsDB.users || {});
+    if (!entries.length) return interaction.reply('Chưa có ai nuôi pet cả :(');
+
+    const sorted = entries
+      .map(([id, p]) => ({ id, ...p, score: p.level*1000 + p.exp }))
+      .sort((a,b) => b.score - a.score)
+      .slice(0, 10);
+
+    const lines = await Promise.all(sorted.map(async (p, i) => {
+      const user = await interaction.client.users.fetch(p.id).catch(()=>null);
+      const name = user?.tag || p.id;
+      return `**${i+1}.** ${petEmoji(p.species)} **${p.name}** — Lv.${p.level} (${p.exp}/${p.level*100}) • 👤 ${name}`;
+    }));
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf06292)
+          .setTitle('🏆 Pet Leaderboard')
+          .setDescription(lines.join('\n'))
       ]
     });
   }
@@ -5373,10 +5523,13 @@ client.on(Events.InteractionCreate, async (itx) => {
   }
 });
 
-// ============== PET STORAGE ==============
+// ============== PET STORAGE (mở rộng) ==============
+import fs from 'fs/promises';
+import path from 'path';
+
 const PETS_FILE = process.env.PETS_FILE || (process.platform === 'win32'
-  ? path.join(process.cwd(), 'pets.json')    // Windows local dev
-  : '/data/pets.json'                        // Railway Volume (khuyên dùng)
+  ? path.join(process.cwd(), 'pets.json')
+  : '/data/pets.json'
 );
 
 let PetsDB = { users: {} };
@@ -5392,7 +5545,6 @@ async function loadPets() {
 
 let _saveTimer = null;
 async function savePets() {
-  // debounce nhẹ để tránh ghi liên tục
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
     try {
@@ -5403,18 +5555,33 @@ async function savePets() {
   }, 300);
 }
 
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function petEmoji(species='dog'){
+  const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
+  return map[species] || '🐾';
+}
+function bar(v) {
+  const fill = Math.round(clamp(v,0,100) / 10);
+  return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${clamp(v,0,100)}%`;
+}
+
+// >>> NEW: số dư & thành tích, cooldown
 function ensurePet(uid, { name, species } = {}) {
   if (!PetsDB.users[uid]) {
     PetsDB.users[uid] = {
       name: name || 'Pet',
-      species: species || 'dog',
+      species: (species || 'dog').toLowerCase(),
       level: 1,
       exp: 0,
-      hp: 100,        // 0..100
-      hunger: 30,     // 0..100 (0 no, 100 đói)
-      happy: 50,      // 0..100
+      hp: 100,      // 0..100
+      hunger: 30,   // 0..100 (0 no, 100 rất đói)
+      happy: 50,    // 0..100
+      coins: 50,    // >>> NEW: tiền khởi điểm
+      wins: 0,      // >>> NEW: thắng
+      losses: 0,    // >>> NEW: thua
       lastFeed: null,
       lastPlay: null,
+      lastBattle: null, // >>> NEW: cooldown battle
       adoptedAt: Date.now()
     };
   }
@@ -5424,23 +5591,26 @@ function ensurePet(uid, { name, species } = {}) {
 function gainExp(pet, amount = 10) {
   pet.exp += amount;
   const need = pet.level * 100;
-  if (pet.exp >= need) {
+  while (pet.exp >= need) {
     pet.exp -= need;
     pet.level += 1;
     pet.hp = Math.min(100, pet.hp + 10);
   }
 }
 
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+// >>> NEW: coins helpers
+function addCoins(pet, n) { pet.coins = Math.max(0, (pet.coins || 0) + n); }
+function spendCoins(pet, n) { if ((pet.coins||0) < n) return false; pet.coins -= n; return true; }
 
-function petEmoji(species='dog'){
-  const map = { dog:'🐶', cat:'🐱', dragon:'🐉', fox:'🦊', panda:'🐼', bunny:'🐰' };
-  return map[species] || '🐾';
-}
-
-function bar(v) {
-  const fill = Math.round(clamp(v,0,100) / 10);
-  return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${clamp(v,0,100)}%`;
+// >>> NEW: random event (quà nhỏ khi dùng lệnh pet)
+function maybeRandomGift(pet) {
+  // 12% tỉ lệ trúng quà
+  if (Math.random() < 0.12) {
+    const gift = 5 + Math.floor(Math.random() * 16); // 5..20
+    addCoins(pet, gift);
+    return gift;
+  }
+  return 0;
 }
 // ============ END PET STORAGE ============
 // ------------------ utils ------------------

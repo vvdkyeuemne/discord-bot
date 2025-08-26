@@ -3455,27 +3455,27 @@ async function resolveSoundCloudUrl(url) {
   return url;
 }
 
-// ==== /admin handler (final gọn) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
-  const THUMB_URL = "https://sv2.anhsieuviet.com/2025/08/26/1000005075.jpg";
-  const BG_GIF    = "https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif";
-
   const embed = new EmbedBuilder()
-    .setColor(0x00bcd4)
+    .setColor(0x00aaff)
     .setTitle("👑 Thông tin Admin")
     .setDescription("Dưới đây là thông tin chi tiết của admin bot:")
+    .setThumbnail("https://sv2.anhsieuviet.com/2025/08/26/1000005075.jpg")
     .addFields(
       { name: "👤 Tên", value: "Võ Viết Duy Khiêm", inline: true },
       { name: "🚹 Giới Tính", value: "Nam", inline: true },
       { name: "🎂 Năm Sinh", value: "21/07/2007", inline: true },
-      { name: "🏡 Nơi Ở", value: "Đà Nẵng", inline: false },
-      { name: "❤️ Mối Quan Hệ", value: "Độc thân", inline: false },
-      { name: "🎶 Sở Thích", value: "Nghe nhạc", inline: false },
+      { name: "🏡 Nơi Ở", value: "Đà Nẵng", inline: true },
+      { name: "❤️ Mối Quan Hệ", value: "Độc thân", inline: true },
+      { name: "🎶 Sở Thích", value: "Nghe nhạc", inline: true },
+      { name: "🌐 Mạng xã hội", value: 
+        "[Facebook](https://www.facebook.com/vvdk2107)\n" +
+        "[Github](https://github.com/vvdkyeuem)\n" +
+        "[TikTok](https://www.tiktok.com/@vovietduykhiem.207)" },
+      { name: "💡 Trạng thái", value: "🚬 Đang Chán Đời..." }
     )
-    .setThumbnail(THUMB_URL)
-    .setImage(BG_GIF)
-    .setFooter({ text: "Cảm Ơn Bạn Đã Sử Dụng Bot! 💗" })
-    .setTimestamp(new Date()); // giữ thời gian Discord tự render
+    .setImage("https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif")
+    .setFooter({ text: `Cảm Ơn Bạn Đã Sử Dụng Bot! 💗 | Hôm nay lúc ${new Date().toLocaleTimeString('vi-VN')}` });
 
   await interaction.reply({ embeds: [embed] });
 }  

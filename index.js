@@ -4042,10 +4042,10 @@ if (sub === 'guildwar') {
 
   // --- START: gọi boss mới ---
   if (action === 'start') {
-    const ok = startBoss(gid, 1200); // HP boss mặc định
+    const ok = startGuildWar(gid, 1200); // HP boss mặc định
     await savePets();
     if (!ok) {
-      const g = ensureGuild(gid);
+      const g = ensureGuildWar(gid);
       return interaction.reply({
         content: `⚠️ Boss đang hoạt động: **${Math.max(0, Math.round(Number(g.boss?.hp)||0))}/${Math.max(0, Math.round(Number(g.boss?.maxHP)||0))} HP**.\nDùng \`/pet guildwar attack\` để tấn công!`,
         ephemeral: true
@@ -4094,7 +4094,7 @@ if (sub === 'guildwar') {
   // --- ATTACK: tấn công boss ---
   if (action === 'attack') {
     const pet = ensurePet(uid);                    // luôn có pet hợp lệ
-    const res = attackBoss(gid, pet, uid);         // từ utils
+    const res = attackGuildWar(gid, pet, uid);         // từ utils
     if (res.error) return interaction.reply({ content: res.error, ephemeral: true });
 
     // cộng thưởng cho người tấn công
@@ -4118,7 +4118,7 @@ if (sub === 'guildwar') {
 
     // nếu boss chết, in bảng xếp hạng
     if (res.ended) {
-      const g = ensureGuild(gid);
+      const g = ensureGuildWar(gid);
       const top = Object.entries(g.contrib || {})
         .sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0))
         .slice(0, 5);
@@ -6053,16 +6053,16 @@ export function ensureGuildWar(gid) {
   return PetsDB.guilds[gid];
 }
 
-export function startBoss(gid, hp = 1200) {
-  const g = ensureGuild(gid);
+export function startGuildWar(gid, hp = 1200) {
+  const g = ensureGuildWar(gid);
   if (g.boss && (Number(g.boss.hp) || 0) > 0) return false; // đã có boss còn sống
   g.boss = { hp: Number(hp) || 1200, maxHP: Number(hp) || 1200, startedAt: Date.now() };
   g.contrib = {};
   return true;
 }
 
-export function attackBoss(gid, pet, uid) {
-  const g = ensureGuild(gid);
+export function attackGuildWar(gid, pet, uid) {
+  const g = ensureGuildWar(gid);
   if (!g.boss || (Number(g.boss.hp) || 0) <= 0) {
     return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
   }

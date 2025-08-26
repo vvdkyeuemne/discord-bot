@@ -3455,20 +3455,10 @@ async function resolveSoundCloudUrl(url) {
   return url;
 }
 
-// ==== /admin handler (with requester + time) ====
+// ==== /admin handler (final gọn) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
   const THUMB_URL = "https://sv2.anhsieuviet.com/2025/08/26/1000005075.jpg";
   const BG_GIF    = "https://sv2.anhsieuviet.com/2025/08/26/1000010890.gif";
-
-  // tên người yêu cầu
-  const requester =
-    interaction.member?.displayName ||
-    interaction.user?.tag ||
-    interaction.user?.username ||
-    "Unknown";
-
-  // thời gian khu vực VN
-  const nowVN = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
 
   const embed = new EmbedBuilder()
     .setColor(0x00bcd4)
@@ -3476,19 +3466,16 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'admin') {
     .setDescription("Dưới đây là thông tin chi tiết của admin bot:")
     .addFields(
       { name: "👤 Tên", value: "Võ Viết Duy Khiêm", inline: true },
-      { name: "🚹 Giới tính", value: "Nam", inline: true },
-      { name: "🎂 Năm sinh", value: "21/07/2007", inline: true },
-      { name: "🏡 Quê quán", value: "Đà Nẵng", inline: false },
-      { name: "❤️ Mối quan hệ", value: "Độc thân", inline: false },
-      { name: "🎶 Sở thích", value: "Nghe nhạc", inline: false },
-      // thêm yêu cầu bởi + thời gian
-      { name: "🧑‍💻 Yêu cầu bởi", value: requester, inline: true },
-      { name: "🕒 Thời gian", value: nowVN, inline: true },
+      { name: "🚹 Giới Tính", value: "Nam", inline: true },
+      { name: "🎂 Năm Sinh", value: "21/07/2007", inline: true },
+      { name: "🏡 Nơi Ở", value: "Đà Nẵng", inline: false },
+      { name: "❤️ Mối Quan Hệ", value: "Độc thân", inline: false },
+      { name: "🎶 Sở Thích", value: "Nghe nhạc", inline: false },
     )
     .setThumbnail(THUMB_URL)
     .setImage(BG_GIF)
     .setFooter({ text: "Cảm Ơn Bạn Đã Sử Dụng Bot! 💗" })
-    .setTimestamp(new Date()); // timestamp chuẩn của Discord
+    .setTimestamp(new Date()); // giữ thời gian Discord tự render
 
   await interaction.reply({ embeds: [embed] });
 }  

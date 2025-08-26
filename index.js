@@ -4042,7 +4042,7 @@ if (sub === 'guildwar') {
 
   // --- START: gọi boss mới ---
   if (action === 'start') {
-    const ok = startBoss(gid, 1200); // HP boss mặc định
+    const ok = startGuildWar(gid, 1200); // HP boss mặc định
     await savePets();
     if (!ok) {
       const g = ensureGuild(gid);

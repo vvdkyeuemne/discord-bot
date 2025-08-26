@@ -5639,11 +5639,6 @@ export function addCoins(pet, amt) {
 }
 
 
-// Cho/Trừ coin
-export function addCoins(pet, amt = 0) {
-  pet.coins = Math.max(0, Math.round((pet.coins || 0) + amt));
-  return pet.coins;
-}
 export function trySpendCoins(pet, cost = 0) {
   const cur = Math.round(pet.coins || 0);
   if (cur < cost) return false;

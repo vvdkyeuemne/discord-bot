@@ -4095,7 +4095,7 @@ if (sub === 'guildwar') {
     }
     return;
   }
-}
+
 
   if (action === 'status') {
     const g = ensureGuildWar(gid);                // <== tên mới
@@ -4110,7 +4110,6 @@ if (sub === 'guildwar') {
       `🛡️ Boss: **${g.boss.hp}/${g.boss.maxHP}** HP\nTop đóng góp:\n` + (lines.join('\n') || '_Không có dữ liệu_')
     );
   }
-}  
 }  
 });
 

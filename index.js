@@ -4144,6 +4144,8 @@ if (sub === 'guildwar') {
   // fallback nếu action không hợp lệ
   return interaction.reply({ content: 'Hành động không hợp lệ. Dùng `start`, `status` hoặc `attack`.', ephemeral: true });
 }    
+}
+});
 
 // ------------------- misc helpers -------------------
 function loveEmoji(p) { if (p>=90) return '💖💖💖'; if (p>=75) return '💞💞'; if (p>=50) return '💘'; if (p>=25) return '💛'; return '🖤'; }

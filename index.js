@@ -5641,6 +5641,29 @@ export function trySpendCoins(pet, cost) {
   pet.coins = cur - cost;
   return true;
 }
+
+// Cho/Trừ coin
+export function addCoins(pet, amt = 0) {
+  pet.coins = Math.max(0, Math.round((pet.coins || 0) + amt));
+  return pet.coins;
+}
+export function trySpendCoins(pet, cost = 0) {
+  const cur = Math.round(pet.coins || 0);
+  if (cur < cost) return false;
+  pet.coins = cur - cost;
+  return true;
+}
+
+// Tặng coin ngẫu nhiên mỗi lần dùng /pet (~15%, 3..10 coin)
+export function maybeRandomGift(pet) {
+  const CHANCE = 0.15;
+  if (Math.random() < CHANCE) {
+    const gain = 3 + Math.floor(Math.random() * 8);
+    addCoins(pet, gain);
+    return gain; // handler dùng để thông báo
+  }
+  return 0;
+}
 // ================== END PET STORAGE UTILS ==================
 // ------------------ utils ------------------
 function fmtTime(sec) {

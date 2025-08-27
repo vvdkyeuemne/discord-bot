@@ -3610,7 +3610,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
 // ==== /adminwork ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
   // kiểm tra quyền: chỉ cho phép bạn hoặc owner bot
-  const ADMIN_IDS = ['YOUR_DISCORD_ID']; // thêm ID bạn vào đây
+  const ADMIN_IDS = ['1274571737589092453']; // thêm ID bạn vào đây
   if (!ADMIN_IDS.includes(interaction.user.id)) {
     return interaction.reply({ content: '❌ Bạn không có quyền dùng lệnh này.', ephemeral: true });
   }

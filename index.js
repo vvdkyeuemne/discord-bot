@@ -3626,44 +3626,50 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
 
 // ==== /adminwork ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-    return interaction.reply({ content: '⛔ Bạn cần quyền **Administrator**.', ephemeral: true });
-  }
+  // tránh timeout 3s
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
   try {
+    // 1) check quyền
+    const isAdmin =
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+      interaction.guild?.ownerId === interaction.user.id;
+    if (!isAdmin) {
+      return interaction.editReply('⛔ Bạn cần quyền **Administrator**.');
+    }
+
+    // 2) chuẩn bị DB
     await loadWallets();
-    const sub = interaction.options.getSubcommand();
+
+    const sub  = interaction.options.getSubcommand();
     const user = interaction.options.getUser('user', true);
     const uid  = user.id;
-    const acc  = ensureWallet(uid); // thay cho ensureAccount
-
-    const fmtCoins = n => `${Math.round(Number(n)||0)} coin(s)`;
+    const acc  = ensureWallet(uid);        // <- dùng wallet API của bạn
+    const fmt  = n => `${Math.round(Number(n) || 0)} coin(s)`;
 
     if (sub === 'addcoins') {
       const amount = interaction.options.getInteger('amount', true);
       addCoinsUser(acc, amount);
       await saveWallets();
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [ new EmbedBuilder()
           .setColor(0x43a047)
           .setTitle('💰 Đã cộng coins')
-          .setDescription(`👤 ${user}\n+ **${fmtCoins(amount)}**\nSố dư: **${fmtCoins(acc.coins)}**`)
-        ],
-        ephemeral: true
+          .setDescription(`👤 ${user}\n+ **${fmt(amount)}**\nSố dư: **${fmt(acc.coins)}**`)
+        ]
       });
     }
 
     if (sub === 'addexp') {
       const amount = interaction.options.getInteger('amount', true);
-      addExpUser(acc, amount);
+      addExpUser(acc, amount);              // auto lên level theo utils của bạn
       await saveWallets();
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [ new EmbedBuilder()
           .setColor(0x42a5f5)
           .setTitle('📈 Đã cộng EXP')
           .setDescription(`👤 ${user}\n+${amount} EXP\nLevel: **${acc.level}** (${acc.exp}/100)`)
-        ],
-        ephemeral: true
+        ]
       });
     }
 
@@ -3672,46 +3678,45 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
       acc.level = level;
       acc.exp   = Math.min(acc.exp || 0, 100);
       await saveWallets();
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [ new EmbedBuilder()
           .setColor(0xffb300)
           .setTitle('🏷️ Đã set level')
           .setDescription(`👤 ${user}\nLevel mới: **${level}**`)
-        ],
-        ephemeral: true
+        ]
       });
     }
 
     if (sub === 'boost') {
       const minutes = Math.max(1, interaction.options.getInteger('minutes', true));
-      acc.boostUntil = Date.now() + minutes * 60_000;
+      acc.boostUntil = Date.now() + minutes * 60_000;  // x2 lương trong N phút
       await saveWallets();
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [ new EmbedBuilder()
           .setColor(0xab47bc)
           .setTitle('⚡ Đã cấp boost x2 lương')
           .setDescription(`👤 ${user}\nThời hạn: **${minutes} phút**`)
-        ],
-        ephemeral: true
+        ]
       });
     }
 
     if (sub === 'resetcooldown') {
       acc.lastWork = 0;
       await saveWallets();
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [ new EmbedBuilder()
           .setColor(0xef5350)
-          .setTitle('🧽 Đã reset cooldown /work')
+          .setTitle('🧽 Reset cooldown /work')
           .setDescription(`👤 ${user}\nCó thể dùng **/work** ngay.`)
-        ],
-        ephemeral: true
+        ]
       });
     }
 
+    // sub không khớp
+    return interaction.editReply('❓ Subcommand không hợp lệ.');
   } catch (e) {
-    console.error('[adminwork]', e);
-    return interaction.reply({ content: '❌ Lỗi khi chạy /adminwork.', ephemeral: true });
+    console.error('[adminwork error]', e);
+    return interaction.editReply('❌ Lỗi khi chạy /adminwork.');
   }
 }  
   // /shop buy

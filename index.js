@@ -941,18 +941,35 @@ new SlashCommandBuilder()
 
 new SlashCommandBuilder()
   .setName('adminwork')
-  .setDescription('Lệnh quản trị hệ /work (admin only)')
-  .addSubcommand(sc => sc
-    .setName('addcoins')
-    .setDescription('Tặng coin cho 1 user')
-    .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
-    .addIntegerOption(o => o.setName('amount').setDescription('Số coin').setRequired(true))
+  .setDescription('Admin: quản lý ví & work')
+  .addSubcommand(sc =>
+    sc.setName('addcoins')
+      .setDescription('Cộng coins cho người dùng')
+      .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Số coins (+/-)').setRequired(true))
   )
-  .addSubcommand(sc => sc
-    .setName('addexp')
-    .setDescription('Tăng exp cho 1 user')
-    .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
-    .addIntegerOption(o => o.setName('amount').setDescription('Số exp').setRequired(true))
+  .addSubcommand(sc =>
+    sc.setName('addexp')
+      .setDescription('Cộng EXP work')
+      .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Số EXP (+/-)').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('setlevel')
+      .setDescription('Set level work')
+      .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+      .addIntegerOption(o => o.setName('level').setDescription('Level >= 1').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('boost')
+      .setDescription('X2 lương trong N phút')
+      .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+      .addIntegerOption(o => o.setName('minutes').setDescription('Số phút boost').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('resetcooldown')
+      .setDescription('Xoá CD lệnh /work của user')
+      .addUserOption(o => o.setName('user').setDescription('Người được reset').setRequired(true))
   ),
   
   // /work
@@ -3609,35 +3626,92 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
 
 // ==== /adminwork ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
-  // kiểm tra quyền: chỉ cho phép bạn hoặc owner bot
-  const ADMIN_IDS = ['1274571737589092453']; // thêm ID bạn vào đây
-  if (!ADMIN_IDS.includes(interaction.user.id)) {
-    return interaction.reply({ content: '❌ Bạn không có quyền dùng lệnh này.', ephemeral: true });
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: '⛔ Bạn cần quyền **Administrator**.', ephemeral: true });
   }
 
-  await loadWallets();
-  const sub = interaction.options.getSubcommand();
-  const target = interaction.options.getUser('user');
-  const uid = target.id;
-  const w = ensureWallet(uid);
+  try {
+    await loadWallets();
+    const sub = interaction.options.getSubcommand();
+    const user = interaction.options.getUser('user', true);
+    const uid  = user.id;
+    const acc  = ensureWallet(uid); // thay cho ensureAccount
 
-  if (sub === 'addcoins') {
-    const amount = interaction.options.getInteger('amount', true);
-    w.coins = (w.coins || 0) + amount;
-    await saveWallets();
-    return interaction.reply(`💰 Đã cộng **${amount}** coins cho ${target.username}. (Số dư: ${w.coins})`);
-  }
+    const fmtCoins = n => `${Math.round(Number(n)||0)} coin(s)`;
 
-  if (sub === 'addexp') {
-    const amount = interaction.options.getInteger('amount', true);
-    w.exp = (w.exp || 0) + amount;
-    // auto lên level nếu đủ exp
-    while (w.exp >= (w.level || 1) * 100) {
-      w.exp -= (w.level || 1) * 100;
-      w.level = (w.level || 1) + 1;
+    if (sub === 'addcoins') {
+      const amount = interaction.options.getInteger('amount', true);
+      addCoinsUser(acc, amount);
+      await saveWallets();
+      return interaction.reply({
+        embeds: [ new EmbedBuilder()
+          .setColor(0x43a047)
+          .setTitle('💰 Đã cộng coins')
+          .setDescription(`👤 ${user}\n+ **${fmtCoins(amount)}**\nSố dư: **${fmtCoins(acc.coins)}**`)
+        ],
+        ephemeral: true
+      });
     }
-    await saveWallets();
-    return interaction.reply(`✨ Đã cộng **${amount} EXP** cho ${target.username}. (Lv.${w.level || 1}, EXP: ${w.exp})`);
+
+    if (sub === 'addexp') {
+      const amount = interaction.options.getInteger('amount', true);
+      addExpUser(acc, amount);
+      await saveWallets();
+      return interaction.reply({
+        embeds: [ new EmbedBuilder()
+          .setColor(0x42a5f5)
+          .setTitle('📈 Đã cộng EXP')
+          .setDescription(`👤 ${user}\n+${amount} EXP\nLevel: **${acc.level}** (${acc.exp}/100)`)
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (sub === 'setlevel') {
+      const level = Math.max(1, interaction.options.getInteger('level', true));
+      acc.level = level;
+      acc.exp   = Math.min(acc.exp || 0, 100);
+      await saveWallets();
+      return interaction.reply({
+        embeds: [ new EmbedBuilder()
+          .setColor(0xffb300)
+          .setTitle('🏷️ Đã set level')
+          .setDescription(`👤 ${user}\nLevel mới: **${level}**`)
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (sub === 'boost') {
+      const minutes = Math.max(1, interaction.options.getInteger('minutes', true));
+      acc.boostUntil = Date.now() + minutes * 60_000;
+      await saveWallets();
+      return interaction.reply({
+        embeds: [ new EmbedBuilder()
+          .setColor(0xab47bc)
+          .setTitle('⚡ Đã cấp boost x2 lương')
+          .setDescription(`👤 ${user}\nThời hạn: **${minutes} phút**`)
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (sub === 'resetcooldown') {
+      acc.lastWork = 0;
+      await saveWallets();
+      return interaction.reply({
+        embeds: [ new EmbedBuilder()
+          .setColor(0xef5350)
+          .setTitle('🧽 Đã reset cooldown /work')
+          .setDescription(`👤 ${user}\nCó thể dùng **/work** ngay.`)
+        ],
+        ephemeral: true
+      });
+    }
+
+  } catch (e) {
+    console.error('[adminwork]', e);
+    return interaction.reply({ content: '❌ Lỗi khi chạy /adminwork.', ephemeral: true });
   }
 }  
   // /shop buy

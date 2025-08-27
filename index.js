@@ -972,23 +972,10 @@ new SlashCommandBuilder()
       .addUserOption(o => o.setName('user').setDescription('Người được reset').setRequired(true))
   ),
   
-  // /work
+
 new SlashCommandBuilder()
   .setName('work')
-  .setDescription('Đi làm kiếm coins')
-  .addStringOption(o =>
-    o.setName('job')
-     .setDescription('Chọn công việc')
-     .addChoices(
-       { name: '🔧 Thợ sửa xe (Lv1+)',   value: 'mechanic' },
-       { name: '☕ Barista (Lv2+)',       value: 'barista' },
-       { name: '🚴 Shipper (Lv3+)',       value: 'shipper' },
-       { name: '🧰 Kỹ thuật viên (Lv4+)', value: 'technician' },
-       { name: '🎨 Designer (Lv5+)',      value: 'designer' },
-       { name: '💻 Dev freelance (Lv7+)', value: 'dev' },
-       { name: '🎥 Streamer (Lv9+)',      value: 'streamer' },
-     )
-  ),
+  .setDescription('Đi làm để nhận lương'), 
 
 // /wallet
 new SlashCommandBuilder()
@@ -1778,6 +1765,19 @@ if (interaction.isStringSelectMenu()) {
   }
 }
 });
+
+// ===== WORK JOBS =====
+const JOBS = [
+  { id:'mechanic',  title:'🔧 Thợ sửa xe',       req:1,  min:12, max:22, exp:10 },
+  { id:'barista',   title:'☕ Barista',          req:2,  min:14, max:26, exp:12 },
+  { id:'shipper',   title:'🚴 Shipper',          req:3,  min:16, max:30, exp:14 },
+  { id:'technician',title:'🧰 Kỹ thuật viên',    req:4,  min:18, max:36, exp:16 },
+  { id:'designer',  title:'🎨 Designer',         req:5,  min:22, max:45, exp:18 },
+  { id:'dev',       title:'💻 Dev freelance',    req:7,  min:28, max:60, exp:20 },
+  { id:'streamer',  title:'🎥 Streamer',         req:9,  min:35, max:80, exp:24 },
+];
+const WORK_CD = 10 * 60 * 1000; // 10 phút
+const workLeftMs = (acc) => Math.max(0, (Number(acc.lastWork)||0) + WORK_CD - Date.now());
 
 // ------------------- slash handlers -------------------
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -3762,48 +3762,45 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
     return safeReply({ content: '❌ Lỗi khi chạy /adminwork.' });
   }
 }  
-// ==== /work ====
+// ===== /work (slash handler) =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
   await loadWallets();
-  const uid = interaction.user.id;
-  const acc = ensureAccount(uid);
+  const acc = ensureWallet(interaction.user.id);
 
-  const JOBS = [
-    { id:'mechanic', title:'🔧 Thợ sửa xe', req:1, min:12, max:22, exp:10 },
-    { id:'barista', title:'☕ Barista', req:2, min:14, max:26, exp:12 },
-    { id:'shipper', title:'🚴 Shipper', req:3, min:16, max:30, exp:14 },
-    { id:'technician', title:'🧰 Kỹ thuật viên', req:4, min:18, max:36, exp:16 },
-    { id:'designer', title:'🎨 Designer', req:5, min:22, max:45, exp:18 },
-    { id:'dev', title:'💻 Dev freelance', req:7, min:28, max:60, exp:20 },
-    { id:'streamer', title:'🎥 Streamer', req:9, min:35, max:80, exp:24 },
-  ];
+  const left = workLeftMs(acc);
+  const leftMin = Math.ceil(left/60000);
+  const cdLine = left > 0 ? `⏳ Cooldown: **${leftMin} phút** còn lại.\n` : '';
 
-  const CD = 10*60*1000;
-  const now = Date.now();
-  if (acc.lastWork && acc.lastWork+CD > now) {
-    const wait = Math.ceil((acc.lastWork+CD-now)/60000);
-    return interaction.reply({ content:`⏳ Bạn cần chờ ${wait} phút nữa.`, ephemeral:true });
+  const avail   = JOBS.filter(j => (acc.level || 1) >= j.req);
+  const blocked = JOBS.filter(j => (acc.level || 1) < j.req);
+
+  const linesAvail = avail.map(j => `• ${j.title} — ${j.min}-${j.max} coins (+${j.exp} EXP)`).join('\n') || '—';
+  const linesBlock = blocked.map(j => `• ${j.title} — cần Lv.${j.req}`).join('\n') || '—';
+
+  const rows = [];
+  for (let i=0; i<avail.length; i+=5) {
+    const slice = avail.slice(i, i+5);
+    rows.push(new ActionRowBuilder().addComponents(
+      ...slice.map(j =>
+        new ButtonBuilder()
+          .setCustomId(`work_job:${j.id}`)
+          .setLabel(j.title.replace(/^[^\w]/,'').trim())
+          .setStyle(ButtonStyle.Primary)
+      )
+    ));
   }
 
-  let job = JOBS.find(j=>j.id===interaction.options.getString('job')) 
-            || JOBS.filter(j=>acc.level>=j.req).pop();
-  const mult = (Number(acc.boostUntil) || 0) > Date.now() ? 2 : 1;
-  const earn = Math.round(
-  (job.min + Math.floor(Math.random() * (job.max - job.min + 1))) * mult
-);
-  addCoinsUser(acc, earn);
-  addExpUser(acc, job.exp);
-  acc.lastWork = now;
-  await saveWallets();
+  const embed = new EmbedBuilder()
+    .setColor(0x4caf50)
+    .setTitle('🧰 Chọn công việc')
+    .setDescription(
+      `Level: **${acc.level || 1}**  •  EXP: **${acc.exp || 0}/${(acc.level||1)*100}**\n` +
+      cdLine +
+      `\n**Có thể làm:**\n${linesAvail}\n\n**Chưa đủ điều kiện:**\n${linesBlock}`
+    )
+    .setFooter({ text: 'Chạm vào một nút để bắt đầu ca làm.' });
 
-  return interaction.reply({
-    embeds:[ new EmbedBuilder()
-      .setColor(0x4caf50)
-      .setTitle(`${job.title} — Ca làm xong!`)
-      .setDescription(`• Lương: **${fmtCoins(earn)}** coins\n• Tổng: **${fmtCoins(acc.coins)}** coins\n• Exp: ${acc.exp}/${acc.level*100} (Lv.${acc.level})`)
-      .setTimestamp(new Date())
-    ]
-  });
+  return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
 }
 
 // ==== /wallet ====
@@ -3817,24 +3814,6 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'wallet') {
   ], ephemeral:true });
 }
 
-// ==== /jobs ====
-if (interaction.isChatInputCommand() && interaction.commandName === 'jobs') {
-  const JOBS = [
-    { id:'mechanic', title:'🔧 Thợ sửa xe', req:1, min:12, max:22 },
-    { id:'barista', title:'☕ Barista', req:2, min:14, max:26 },
-    { id:'shipper', title:'🚴 Shipper', req:3, min:16, max:30 },
-    { id:'technician', title:'🧰 Kỹ thuật viên', req:4, min:18, max:36 },
-    { id:'designer', title:'🎨 Designer', req:5, min:22, max:45 },
-    { id:'dev', title:'💻 Dev freelance', req:7, min:28, max:60 },
-    { id:'streamer', title:'🎥 Streamer', req:9, min:35, max:80 },
-  ];
-  const lines = JOBS.map(j=>`**${j.title}** — Lv.${j.req}+ • ${j.min}-${j.max} coins`).join('\n');
-  return interaction.reply({ embeds:[ new EmbedBuilder()
-    .setColor(0xff9800)
-    .setTitle('📋 Danh sách công việc')
-    .setDescription(lines)
-  ], ephemeral:true });
-}
 // ==== /playlist (SoundCloud) ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'playlist') {
   const gid = interaction.guildId;
@@ -6630,3 +6609,47 @@ process.on('unhandledRejection', (r) => console.error('UNHANDLED', r));
 process.on('uncaughtException', (e) => console.error('UNCAUGHT', e));
 
 export const ensureAccount = ensureWallet;
+
+// ===== Button handler (ONE global listener) =====
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  if (!itx.customId.startsWith('work_job:')) return;
+
+  await loadWallets();
+  const uid = itx.user.id;
+  const acc = ensureWallet(uid);
+
+  const jobId = itx.customId.split(':')[1];
+  const job = JOBS.find(j => j.id === jobId);
+  if (!job) return itx.reply({ content: '❌ Công việc không hợp lệ.', ephemeral: true });
+
+  if ((acc.level || 1) < job.req) {
+    return itx.reply({ content: `🚫 Cần **Level ${job.req}**.`, ephemeral: true });
+  }
+
+  const left = workLeftMs(acc);
+  if (left > 0) {
+    const m = Math.ceil(left/60000);
+    return itx.reply({ content: `⏳ Chờ **${m} phút** nữa.`, ephemeral: true });
+  }
+
+  const mult = (Number(acc.boostUntil) || 0) > Date.now() ? 2 : 1;
+  const earn = Math.round((job.min + Math.floor(Math.random()*(job.max - job.min + 1))) * mult);
+
+  addCoinsUser(acc, earn);
+  addExpUser(acc, job.exp);
+  acc.lastWork = Date.now();
+  await saveWallets();
+
+  const embed = new EmbedBuilder()
+    .setColor(0x4caf50)
+    .setTitle(`${job.title} — Ca làm xong!`)
+    .setDescription([
+      `• Lương: **${fmtCoins(earn)}** coins${mult>1?' (x2 boost)':''}`,
+      `• Tổng: **${fmtCoins(acc.coins)}** coins`,
+      `• Exp: **${acc.exp}/${(acc.level||1)*100}** (Lv.${acc.level||1})`
+    ].join('\n'))
+    .setTimestamp(new Date());
+
+  return itx.reply({ embeds: [embed], ephemeral: true });
+});

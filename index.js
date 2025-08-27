@@ -6509,6 +6509,9 @@ client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
 
   const [action, gid] = (itx.customId || '').split(':');
+
+  // 🔒 Chỉ xử lý NÚT NHẠC, tránh đụng nút boss/khác
+  if (!action?.startsWith('sc_')) return;
   if (!gid || itx.guildId !== gid) return;
 
   const state = Music.get(gid);

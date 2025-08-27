@@ -925,6 +925,36 @@ new SlashCommandBuilder()
   .setName('admin')
   .setDescription('Xem thông tin admin bot'),
 
+new SlashCommandBuilder()
+  .setName('shop')
+  .setDescription('Cửa hàng coin (hệ /work)')
+  .addSubcommand(sc => sc.setName('list').setDescription('Xem danh sách vật phẩm'))
+  .addSubcommand(sc => sc.setName('buy').setDescription('Mua vật phẩm')
+    .addStringOption(o => o.setName('item').setDescription('ID vật phẩm')
+      .setRequired(true)
+      .addChoices(
+        { name: 'Booster 30 phút (x2 lương /work)', value: 'booster30' },
+        { name: 'Vé may mắn', value: 'luckyticket' },
+      )
+    )
+  ),  
+
+new SlashCommandBuilder()
+  .setName('adminwork')
+  .setDescription('Lệnh quản trị hệ /work (admin only)')
+  .addSubcommand(sc => sc
+    .setName('addcoins')
+    .setDescription('Tặng coin cho 1 user')
+    .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Số coin').setRequired(true))
+  )
+  .addSubcommand(sc => sc
+    .setName('addexp')
+    .setDescription('Tăng exp cho 1 user')
+    .addUserOption(o => o.setName('user').setDescription('Người nhận').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Số exp').setRequired(true))
+  ),
+  
   // /work
 new SlashCommandBuilder()
   .setName('work')
@@ -3515,6 +3545,130 @@ const timeStr = new Intl.DateTimeFormat('vi-VN', {
   await interaction.reply({ embeds: [embed] });
 }  
 
+// ==== /shop (hệ /work) ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
+  await loadWallets();
+  const uid = interaction.user.id;
+  const w = ensureWallet(uid);
+  const sub = interaction.options.getSubcommand();
+
+  // Danh mục vật phẩm
+  const CATALOG = {
+    booster30: {
+      id: 'booster30',
+      name: 'Booster 30 phút (x2 lương /work)',
+      price: 100,
+      desc: 'Nhận x2 lương từ lệnh /work trong 30 phút kể từ khi mua.',
+      apply: () => {
+        const now = Date.now();
+        const base = Math.max(now, Number(w.boostUntil) || 0);
+        w.boostUntil = base + 30 * 60 * 1000;
+        return `⏱ Hiệu lực đến: <t:${Math.floor(w.boostUntil/1000)}:t>`;
+      },
+    },
+    luckyticket: {
+      id: 'luckyticket',
+      name: 'Vé may mắn',
+      price: 15,
+      desc: 'Mua là quay ngay, nhận ngẫu nhiên 5–40 coins.',
+      apply: () => {
+        const gain = 5 + Math.floor(Math.random() * 36); // 5..40
+        w.coins = Math.max(0, Math.round((w.coins || 0) + gain));
+        return `🎉 Bạn đã trúng **${gain}** coins!`;
+      },
+    },
+  };
+
+  // Helper booster
+  const boosterLeft = () => {
+    const left = (Number(w.boostUntil) || 0) - Date.now();
+    if (left > 0) {
+      const m = Math.ceil(left / 60000);
+      return `\n> ⚡ Booster hiện **còn ~${m} phút**.`;
+    }
+    return '';
+  };
+
+  // /shop list
+  if (sub === 'list') {
+    const lines = Object.values(CATALOG).map(i =>
+      `**${i.id}** — ${i.name}\n• Giá: **${i.price}** coins\n• ${i.desc}`
+    ).join('\n\n');
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x00c853)
+          .setTitle('🛒 Cửa hàng (hệ /work)')
+          .setDescription(lines + boosterLeft())
+          .setFooter({ text: `Số dư: ${w.coins || 0} coins` })
+      ],
+      ephemeral: true
+    });
+  }
+
+// ==== /adminwork ====
+if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
+  // kiểm tra quyền: chỉ cho phép bạn hoặc owner bot
+  const ADMIN_IDS = ['YOUR_DISCORD_ID']; // thêm ID bạn vào đây
+  if (!ADMIN_IDS.includes(interaction.user.id)) {
+    return interaction.reply({ content: '❌ Bạn không có quyền dùng lệnh này.', ephemeral: true });
+  }
+
+  await loadWallets();
+  const sub = interaction.options.getSubcommand();
+  const target = interaction.options.getUser('user');
+  const uid = target.id;
+  const w = ensureWallet(uid);
+
+  if (sub === 'addcoins') {
+    const amount = interaction.options.getInteger('amount', true);
+    w.coins = (w.coins || 0) + amount;
+    await saveWallets();
+    return interaction.reply(`💰 Đã cộng **${amount}** coins cho ${target.username}. (Số dư: ${w.coins})`);
+  }
+
+  if (sub === 'addexp') {
+    const amount = interaction.options.getInteger('amount', true);
+    w.exp = (w.exp || 0) + amount;
+    // auto lên level nếu đủ exp
+    while (w.exp >= (w.level || 1) * 100) {
+      w.exp -= (w.level || 1) * 100;
+      w.level = (w.level || 1) + 1;
+    }
+    await saveWallets();
+    return interaction.reply(`✨ Đã cộng **${amount} EXP** cho ${target.username}. (Lv.${w.level || 1}, EXP: ${w.exp})`);
+  }
+}  
+  // /shop buy
+  if (sub === 'buy') {
+    const id = (interaction.options.getString('item', true) || '').toLowerCase();
+    const item = CATALOG[id];
+    if (!item) {
+      return interaction.reply({ content: '❌ Vật phẩm không hợp lệ. Dùng `/shop list` để xem danh sách.', ephemeral: true });
+    }
+
+    const balance = Math.round(w.coins || 0);
+    if (balance < item.price) {
+      return interaction.reply({ content: `💸 Bạn không đủ coins. Cần **${item.price}**, đang có **${balance}**.`, ephemeral: true });
+    }
+
+    // trừ tiền + hiệu lực
+    w.coins = balance - item.price;
+    const extra = item.apply();
+
+    await saveWallets();
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x64dd17)
+          .setTitle('✅ Mua thành công')
+          .setDescription(`Bạn đã mua **${item.name}** với giá **${item.price}** coins.\n${extra}\n\nSố dư còn: **${w.coins}** coins.`)
+      ]
+    });
+  }
+}  
 // ==== /work ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
   await loadWorkDB();
@@ -3540,8 +3694,10 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
 
   let job = JOBS.find(j=>j.id===interaction.options.getString('job')) 
             || JOBS.filter(j=>acc.level>=j.req).pop();
-
-  const earn = job.min + Math.floor(Math.random()*(job.max-job.min+1));
+  const mult = (Number(acc.boostUntil) || 0) > Date.now() ? 2 : 1;
+  const earn = Math.round(
+  (job.min + Math.floor(Math.random() * (job.max - job.min + 1))) * mult
+);
   addCoinsUser(acc, earn);
   addExpUser(acc, job.exp);
   acc.lastWork = now;

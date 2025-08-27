@@ -6939,9 +6939,15 @@ client.once(Events.ClientReady, async () => {
       const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:00','19:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
       if (!auto.enabled) continue;
 
-      const hhmm = fmtHHMM(auto.tz);
-      const should = auto.times.includes(hhmm);
-      const cool = NOW() - (Number(auto.lastSpawn)||0);
+// Giờ/phút theo múi giờ VN (hoặc truyền tz khác)
+function fmtHHMM(tz = 'Asia/Ho_Chi_Minh') {
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(new Date());
+}
 
       if (should && cool > 4*60*1000) {
         const meta = pickBoss();

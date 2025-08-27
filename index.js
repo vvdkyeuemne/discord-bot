@@ -3671,7 +3671,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
 }  
 // ==== /work ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
-  await loadWorkDB();
+  await loadWallets();
   const uid = interaction.user.id;
   const acc = ensureAccount(uid);
 
@@ -3701,7 +3701,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
   addCoinsUser(acc, earn);
   addExpUser(acc, job.exp);
   acc.lastWork = now;
-  await saveWorkDB();
+  await saveWallets();
 
   return interaction.reply({
     embeds:[ new EmbedBuilder()
@@ -3715,7 +3715,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'work') {
 
 // ==== /wallet ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'wallet') {
-  await loadWorkDB();
+  await loadWallets();
   const acc = ensureAccount(interaction.user.id);
   return interaction.reply({ embeds:[ new EmbedBuilder()
     .setColor(0x00bcd4)
@@ -5917,43 +5917,89 @@ client.on('messageCreate', async (msg) => {
   } catch { /* nuốt lỗi để tránh spam log */ }
 });
 
-// ===== utils work =====
+// ==================== WALLET / WORK DB ====================
 
-const WORK_FILE = process.env.WORK_FILE || (
+// File data (ưu tiên volume /data trên Railway)
+export const WALLETS_FILE = process.env.WALLETS_FILE || (
   process.platform === 'win32'
-    ? path.join(process.cwd(), 'work.json')
-    : '/data/work.json'
+    ? path.join(process.cwd(), 'wallets.json')   // local dev
+    : '/data/wallets.json'                       // Railway Volume
 );
 
-let WorkDB = { users: {} };
+// RAM DB
+export let WalletDB = { users: {} };
 
-function _nz(n, d=0){ n = Number(n); return Number.isFinite(n) ? n : d; }
-
-async function loadWorkDB() {
-  try {
-    const t = await fs.readFile(WORK_FILE, 'utf8');
-    WorkDB = JSON.parse(t || '{"users":{}}');
-  } catch { WorkDB = { users: {} }; }
+// Chuẩn hoá 1 account
+export function normalizeWallet(a) {
+  if (!a) return a;
+  a.coins      = Number.isFinite(a.coins) ? a.coins : 0;
+  a.exp        = Number.isFinite(a.exp)   ? a.exp   : 0;
+  a.level      = Number.isFinite(a.level) ? a.level : 1;
+  a.lastWork   = Number(a.lastWork) || 0;
+  a.boostUntil = Number(a.boostUntil) || 0;  // hết hạn x2 lương (ms)
+  a.inventory  = a.inventory && typeof a.inventory === 'object' ? a.inventory : {};
+  return a;
 }
 
-async function saveWorkDB() {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    try { await fs.writeFile(WORK_FILE, JSON.stringify(WorkDB, null, 2)); }
-    catch(e){ console.warn('saveWorkDB error:', e?.message||e); }
+// Nạp file -> RAM
+export async function loadWallets() {
+  try {
+    const t = await fs.readFile(WALLETS_FILE, 'utf8');
+    WalletDB = JSON.parse(t || '{"users":{}}');
+  } catch {
+    WalletDB = { users: {} };
+  }
+  for (const uid of Object.keys(WalletDB.users || {})) {
+    WalletDB.users[uid] = normalizeWallet(WalletDB.users[uid]);
+  }
+}
+
+// Lưu file (debounce)
+let _walletTimer = null;
+export async function saveWallets() {
+  if (_walletTimer) clearTimeout(_walletTimer);
+  _walletTimer = setTimeout(async () => {
+    try {
+      await fs.writeFile(WALLETS_FILE, JSON.stringify(WalletDB, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('saveWallets error:', e?.message || e);
+    }
   }, 300);
 }
 
-function ensureAccount(uid) {
-  if (!WorkDB.users[uid]) WorkDB.users[uid] = { coins:0, level:1, exp:0, lastWork:0 };
-  return WorkDB.users[uid];
+// Tạo/lấy account
+export function ensureWallet(uid) {
+  if (!WalletDB.users[uid]) {
+    WalletDB.users[uid] = normalizeWallet({
+      coins: 0, exp: 0, level: 1,
+      lastWork: 0, boostUntil: 0,
+      inventory: {}
+    });
+  }
+  return WalletDB.users[uid];
 }
-function addCoinsUser(u, amt){ u.coins = Math.max(0, Math.round(_nz(u.coins)+amt)); }
-function addExpUser(u, amt){
-  u.exp += amt;
-  while (u.exp >= u.level*100){ u.exp -= u.level*100; u.level++; }
+
+// Helpers số dư/exp
+export function addCoinsUser(acc, amt) {
+  acc.coins = Math.max(0, Math.round((acc.coins || 0) + amt));
+  return acc.coins;
 }
-function fmtCoins(n){ return _nz(n).toLocaleString('vi-VN'); }
+export function addExpUser(acc, exp) {
+  acc.exp = Math.max(0, Math.round((acc.exp || 0) + exp));
+  while (acc.exp >= acc.level * 100) {
+    acc.exp -= acc.level * 100;
+    acc.level++;
+  }
+  return acc.level;
+}
+
+// Format gọn tiền
+export function fmtCoins(n) {
+  n = Math.round(Number(n) || 0);
+  if (n >= 1e6) return `${(n/1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n/1e3).toFixed(1)}k`;
+  return `${n}`;
+      }
 
 // ===== PLAYLIST STORE (persist to Railway volume) =====
 export const PLAYLISTS_FILE =

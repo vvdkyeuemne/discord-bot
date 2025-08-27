@@ -3988,10 +3988,11 @@ if (sub === 'add') {
     return interaction.reply({ content: '❌ Có lỗi xảy ra với playlist.', ephemeral: true });
   }
 }
-client.on(Events.InteractionCreate, async (itx) => {
-  if (!itx.isButton()) return;
-  const [action, gid] = itx.customId.split(':');
-  if (!gid || itx.guildId !== gid) return;
+client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) return;
+ const [action, gid] = (itx.customId || '').split(':');
+ // 🔒 Chỉ nhận NÚT NHẠC (bắt đầu bằng sc_)
+ if (!action || !action.startsWith('sc_')) return;
+ if (!gid || itx.guildId !== gid) return;
 
   const state = Music.get(gid);
   if (!state) return itx.reply({ content: 'Không có phiên phát nhạc.', ephemeral: true }).catch(()=>{});

@@ -4012,97 +4012,57 @@ client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) retur
   } catch {}
 }); 
 
-// ==== boss hanlder ====
+// ================= Slash: /boss =================
 if (interaction.isChatInputCommand() && interaction.commandName === 'boss') {
+  await loadRaid();
   const gid = interaction.guildId;
   const sub = interaction.options.getSubcommand();
 
-  await loadRaid();
-
+  // /boss start [hp] [boss_id]
   if (sub === 'start') {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.reply({ content:'Bạn cần quyền **Manage Server** để gọi boss.', ephemeral:true });
+      return interaction.reply({ content: 'Bạn cần quyền **Manage Server** để gọi boss.', ephemeral: true });
     }
-    const hp = interaction.options.getInteger('hp') ?? null;
-    const chosen = pickBoss();
-    const ok = raidStart(gid, hp, chosen.id, interaction.guild);
-    if (!ok) return interaction.reply({ content:'⚠️ Boss đang tồn tại. Dùng `/boss status`.', ephemeral:true });
+    const hp     = interaction.options.getInteger('hp') || null;
+    const bossId = interaction.options.getString('boss') || null;
+
+    const ok = raidStart(gid, hp, bossId, interaction.guild);
+    if (!ok) return interaction.reply({ content: '⚠️ Boss đang tồn tại. Dùng `/boss status`.', ephemeral: true });
 
     const r = ensureRaidGuild(gid);
-    return interaction.reply({ embeds:[buildStartEmbed(r)], components: raidButtons(gid) });
+    return interaction.reply({ embeds: [buildStartEmbed(r)], components: raidButtons(gid) });
   }
 
+  // /boss status
   if (sub === 'status') {
     const r = ensureRaidGuild(gid);
-    if (!r.boss || r.boss.hp<=0) return interaction.reply({ content:'Hiện **không có boss**.', ephemeral:true });
+    if (!r.boss || r.boss.hp <= 0) {
+      return interaction.reply({ content: 'Hiện **không có boss** nào đang hoạt động.', ephemeral: true });
+    }
 
-    const top = Object.entries(r.contrib||{}).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
-      const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
-      const name = m?.displayName || uid;
+    const top = Object.entries(r.contrib || {}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const names = await Promise.all(top.map(async ([uid, dmg], i) => {
+      const m = await interaction.guild.members.fetch(uid).catch(()=>null);
+      const name = m?.displayName || `<@${uid}>`;
       return `**${i+1}.** ${name} — ${dmg} dmg`;
     }));
 
-    return interaction.reply({
-      embeds:[
-        new EmbedBuilder()
-          .setColor(r.boss?.color ?? 0x90caf9)
-          .setTitle(`📊 ${r.boss?.name || 'Boss'}`)
-          .setDescription(`HP: **${r.boss.hp}/${r.boss.maxHP}**\n\n**Top đóng góp:**\n${lines.join('\n') || '—'}`)
-          .setImage(r.boss?.img || null)
-      ],
-      components: raidButtons(gid),
-      ephemeral:true
-    });
+    const B = r.boss;
+    const embed = new EmbedBuilder()
+      .setColor(B.color ?? 0x90caf9)
+      .setTitle(`${B.emoji || ''} ${B.name} — Tình hình`)
+      .setDescription([
+        `HP: **${B.hp}/${B.maxHP}**`,
+        `\`${hpBar(B.hp, B.maxHP)}\``,
+        B.note ? `> *${B.note}*` : ''
+      ].filter(Boolean).join('\n'))
+      .setImage(B.img || null)
+      .addFields({ name: 'Bảng xếp hạng', value: names.join('\n') || 'Chưa có ai tấn công.' })
+      .setTimestamp(Date.now());
+
+    return interaction.reply({ embeds: [embed], components: raidButtons(gid) });
   }
-
-  if (sub === 'attack') {
-    await loadWallets();
-    const acc = ensureWallet(interaction.user.id);
-
-    const res = raidAttack(gid, acc, interaction.user.id);
-    if (res.error) return interaction.reply({ content:res.error, ephemeral:true });
-
-    // thưởng work–wallet
-    const coin = Math.round((2 + res.dmg/3) * (res.reward||1));
-    const exp  = Math.round((1 + res.dmg/5) * (res.reward||1));
-    addCoinsUser(acc, coin);
-    addExpUser(acc, exp);
-    await saveWallets();
-
-    await interaction.reply(`⚔️ **${interaction.user.username}** gây **${res.dmg}**${res.crit?' (CRIT)':''} dmg. Boss còn **${res.hp}/${res.maxHP}** HP. (+${coin} coins, +${exp} EXP)`);
-
-    if (res.ended) {
-      const r = ensureRaidGuild(gid);
-      const top = Object.entries(r.contrib||{}).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
-      for (const [uid, dmg] of top) {
-        const uacc = ensureWallet(uid);
-        const bCoin = Math.round((10 + dmg/10) * (r.boss?.reward||1));
-        const bExp  = Math.round((5  + dmg/20) * (r.boss?.reward||1));
-        addCoinsUser(uacc, bCoin);
-        addExpUser(uacc, bExp);
-      }
-      await saveWallets();
-
-      const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
-        const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
-        const name = m?.displayName || uid;
-        return `**${i+1}.** ${name} — ${dmg} dmg`;
-      }));
-
-      await interaction.followUp({
-        embeds:[
-          new EmbedBuilder()
-            .setColor(0x66bb6a)
-            .setTitle(`🏁 ${ensureRaidGuild(gid).boss?.name || 'Boss'} đã bị hạ!`)
-            .setDescription(lines.length ? lines.join('\n') : 'Không có dữ liệu')
-        ]
-      }).catch(()=>{});
     }
-    return;
-  }
-}
   
 // ==== /pet handler ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
@@ -6189,150 +6149,219 @@ export function fmtCoins(n) {
   return `${n}`;
       }
 
-// ============ RAID BOSS DB ============
-export const RAID_FILE = process.env.RAID_FILE || (
-  process.platform === 'win32'
-    ? path.join(process.cwd(), 'raid_boss.json')
-    : '/data/raid_boss.json'
-);
-export let RaidDB = { guilds: {} };
+// ====================== RAID / BOSS SYSTEM (drop-in) ======================
+// File DB ưu tiên volume /data trên Railway
+const RAID_FILE =
+  process.env.RAID_FILE ||
+  (process.platform === 'win32'
+    ? require('path').join(process.cwd(), 'raid.json')
+    : '/data/raid.json');
 
-function normalizeRaidGuild(g) {
-  if (!g) g = {};
-  g.boss    = g.boss && typeof g.boss === 'object' ? g.boss : null;
-  g.contrib = g.contrib && typeof g.contrib === 'object' ? g.contrib : {};
-  g.lastEnd = Number(g.lastEnd) || 0;
-  g.auto = g.auto && typeof g.auto === 'object' ? g.auto : {
-    enabled: true,
-    times: ['09:00','13:00','19:00'],
-    tz: 'Asia/Ho_Chi_Minh',
-    lastSpawn: 0
+let RaidDB = { guilds: {} };
+
+// Chuẩn hoá 1 guild-raid record
+function normalizeRaidGuild(g = {}) {
+  return {
+    boss: g.boss && typeof g.boss === 'object' ? g.boss : null, // {id,name,emoji,color,img,hp,maxHP,reward,note,startedAt}
+    contrib: g.contrib && typeof g.contrib === 'object' ? g.contrib : {}, // uid -> dmg
+    cool: g.cool && typeof g.cool === 'object' ? g.cool : {},           // uid -> ts
+    auto: g.auto && typeof g.auto === 'object' ? g.auto : null,          // (tuỳ ý)
+    lastEnd: Number(g.lastEnd) || 0
   };
-  g.cool = g.cool || {};
-  return g;
 }
 
-export async function loadRaid() {
+// I/O
+async function loadRaid() {
+  const fs = require('fs/promises');
   try {
     const t = await fs.readFile(RAID_FILE, 'utf8');
     RaidDB = JSON.parse(t || '{"guilds":{}}');
-  } catch { RaidDB = { guilds: {} }; }
-  for (const k of Object.keys(RaidDB.guilds || {})) {
-    RaidDB.guilds[k] = normalizeRaidGuild(RaidDB.guilds[k]);
+  } catch {
+    RaidDB = { guilds: {} };
+  }
+  for (const gid of Object.keys(RaidDB.guilds || {})) {
+    RaidDB.guilds[gid] = normalizeRaidGuild(RaidDB.guilds[gid]);
   }
 }
 
 let _raidTimer = null;
-export async function saveRaid() {
+async function saveRaid() {
+  const fs = require('fs/promises');
   if (_raidTimer) clearTimeout(_raidTimer);
   _raidTimer = setTimeout(async () => {
-    try { await fs.writeFile(RAID_FILE, JSON.stringify(RaidDB, null, 2), 'utf8'); }
-    catch (e) { console.warn('saveRaid error:', e?.message || e); }
+    try {
+      await fs.writeFile(RAID_FILE, JSON.stringify(RaidDB, null, 2), 'utf8');
+    } catch (e) { console.warn('saveRaid error:', e?.message || e); }
   }, 300);
 }
 
-export function ensureRaidGuild(gid) {
+function ensureRaidGuild(gid) {
   if (!RaidDB.guilds[gid]) RaidDB.guilds[gid] = normalizeRaidGuild({});
   return RaidDB.guilds[gid];
 }
 
-// ===== DANH MỤC BOSS =====
+const NOW = () => Date.now();
+
+// ============== BOSS CATALOG (merge: 3 cũ + 7 mới) ==============
 const BOSSES = [
-  { id:'slime',   name:'King Slime',    hp:1200, color:0x64b5f6, img:'https://sv2.anhsieuviet.com/2025/08/27/1000010951.gif', reward:1.0 },
-  { id:'dragon',  name:'Fire Drake',    hp:2500, color:0xff7043, img:'https://sv2.anhsieuviet.com/2025/08/27/1000010947.gif', reward:1.3 },
-  { id:'ancient', name:'Ancient Titan', hp:5000, color:0x9575cd, img:'https://sv2.anhsieuviet.com/2025/08/27/attack-on-titan-colossal-titan.gif', reward:1.7 },
+  // 3 boss cũ
+  { id:'slime',   name:'King Slime',    emoji:'🟢', color:0x64b5f6,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/1000010951.gif',
+    hpRange:[1100,1400], reward: { coins:[28,55], exp:[14,26] },
+    note:'Slime vua – dễ tiếp cận, khởi động tay.' },
+
+  { id:'dragon',  name:'Fire Drake',    emoji:'🐲', color:0xff7043,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/1000010947.gif',
+    hpRange:[2200,2800], reward: { coins:[40,80], exp:[22,34] },
+    note:'Rồng lửa – thở ra lửa, damage rát.' },
+
+  { id:'ancient', name:'Ancient Titan', emoji:'🗿', color:0x9575cd,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/attack-on-titan-colossal-titan.gif',
+    hpRange:[4500,5500], reward: { coins:[55,110], exp:[28,44] },
+    note:'Cổ titan – trâu bò, phần thưởng xứng đáng.' },
+
+  // 7 boss mới
+  { id:'demon_king',  name:'Demon King',  emoji:'😈',  color:0x9b1c1c,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/1000010997.gif',
+    hpRange:[1500,2200], reward:{ coins:[40,85], exp:[22,36] },
+    note:'Chúa tể địa ngục – đôi khi chí mạng.' },
+
+  { id:'ancient_treant', name:'Ancient Treant', emoji:'🌳', color:0x2e7d32,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/undefined---Imgur.gif',
+    hpRange:[1700,2400], reward:{ coins:[35,70], exp:[18,32] },
+    note:'Cây cổ thụ – nhiều máu, thưởng đều.' },
+
+  { id:'thunder_wolf', name:'Thunder Wolf', emoji:'⚡🐺', color:0x0277bd,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/thunder-wolf.gif',
+    hpRange:[1300,1900], reward:{ coins:[30,75], exp:[20,34] },
+    note:'Sói sấm – HP vừa phải, đòn đau.' },
+
+  { id:'sand_wyrm', name:'Sand Wyrm', emoji:'🏜️🐍', color:0xcc8f00,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/sandworm.gif',
+    hpRange:[1600,2300], reward:{ coins:[38,82], exp:[21,35] },
+    note:'Giun cát – thưởng coin cao.' },
+
+  { id:'ice_queen', name:'Ice Queen', emoji:'👑❄️', color:0x81d4fa,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/icequeen.gif',
+    hpRange:[1400,2100], reward:{ coins:[33,76], exp:[22,38] },
+    note:'Nữ hoàng băng – exp nhiều.' },
+
+  { id:'mecha_titan', name:'Mecha Titan', emoji:'🤖', color:0x546e7a,
+    img:'https://sv2.anhsieuviet.com/2025/08/27/mechatitan.gif',
+    hpRange:[2000,2800], reward:{ coins:[45,95], exp:[26,42] },
+    note:'Cỗ máy hủy diệt – HP lớn, thưởng lớn.' },
+
+  { id:'void_specter', name:'Void Specter', emoji:'🌀👻', color:0x6a1b9a,
+    img:'https://i.ibb.co/kgJ7rBst/spectre.gif',
+    hpRange:[1500,2200], reward:{ coins:[37,80], exp:[24,40] },
+    note:'Vong hồn hư không – cân bằng exp/coin.' },
 ];
 
-const NOW = () => Date.now();
-function pickBoss(bossId=null){ return bossId ? (BOSSES.find(b=>b.id===bossId)||BOSSES[0]) : BOSSES[Math.floor(Math.random()*BOSSES.length)]; }
-function fmtHHMM(tz='Asia/Ho_Chi_Minh'){
-  return new Intl.DateTimeFormat('vi-VN',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
-}
-function scaleHP(base, guild){
-  const mc = Math.max(10, Number(guild?.memberCount) || 30);
-  const factor = 1 + Math.floor(mc/25)*0.2; // +20% mỗi 25 member
-  return Math.round(base*factor);
+// scale HP theo quy mô server (nhẹ)
+function scaleHP([min, max], guild) {
+  const base = min + Math.floor(Math.random() * (max - min + 1));
+  const size = Math.max(1, Math.min(5, Math.ceil((guild?.memberCount || 40) / 100)));
+  return Math.round(base * (1 + (size - 1) * 0.12)); // +12% mỗi 100 mem (tối đa x1.48)
 }
 
-// cooldown cá nhân khi attack
-const RAID_ATK_CD = 15 * 1000;
-function canAttack(r, uid){
-  const left = Math.max(0, (Number(r.cool?.[uid])||0) - NOW());
-  return { ok: left<=0, left };
+// chọn boss theo id hoặc ngẫu nhiên
+function pickBoss(metaId = null, guild = null) {
+  const b = metaId ? BOSSES.find(x => x.id === metaId) : BOSSES[Math.floor(Math.random() * BOSSES.length)];
+  if (!b) return null;
+  const hp = scaleHP(b.hpRange, guild);
+  return {
+    id: b.id, name: b.name, emoji: b.emoji, color: b.color, img: b.img,
+    hp, maxHP: hp, reward: b.reward, note: b.note
+  };
 }
-function markCd(r, uid){
+
+// Cooldown cá nhân khi attack
+const RAID_ATK_CD = 15 * 1000;
+function canAttack(r, uid) {
+  const left = Math.max(0, (Number(r.cool?.[uid]) || 0) - NOW());
+  return { ok: left <= 0, left };
+}
+function markCd(r, uid) {
   r.cool = r.cool || {};
   r.cool[uid] = NOW() + RAID_ATK_CD;
 }
 
-// ===== START / ATTACK =====
-export function raidStart(gid, hpOrNull=null, bossId=null, guildObj=null){
+// Damage & phần thưởng (theo level)
+function rollDamage(userAcc = { level:1 }) {
+  const lv = Math.max(1, Number(userAcc?.level) || 1);
+  const base = 8 + lv * 1.8;
+  const rand = 3 + Math.floor(Math.random() * 10);
+  const crit = Math.random() < 0.12 ? 1.8 : 1;
+  const dmg = Math.max(5, Math.round((base + rand) * crit));
+  return { dmg, crit: crit > 1 };
+}
+function rollReward(bossReward) {
+  const rng = (a,b)=> a + Math.floor(Math.random()*(b-a+1));
+  const coins = rng(bossReward.coins[0], bossReward.coins[1]);
+  const exp   = rng(bossReward.exp[0],   bossReward.exp[1]);
+  return { coins, exp };
+}
+
+// Bắt đầu raid
+function raidStart(gid, hpOrNull = null, bossId = null, guildObj = null) {
   const r = ensureRaidGuild(gid);
-  if (r.boss && Number(r.boss.hp)>0) return false;
+  if (r.boss && Number(r.boss.hp) > 0) return false;
 
-  const meta = pickBoss(bossId);
-  const baseHP = Number(hpOrNull) || meta.hp;
-  const finalHP = scaleHP(baseHP, guildObj);
+  const meta = pickBoss(bossId, guildObj);
+  if (!meta) return false;
 
-  r.boss = {
-    id: meta.id, name: meta.name, color: meta.color, img: meta.img,
-    hp: finalHP, maxHP: finalHP, startedAt: NOW(), reward: meta.reward || 1
-  };
+  // nếu admin ép HP cụ thể
+  if (Number(hpOrNull)) {
+    meta.hp = meta.maxHP = Number(hpOrNull);
+  }
+
+  r.boss = { ...meta, startedAt: NOW() };
   r.contrib = {};
   r.cool = {};
   saveRaid();
   return true;
 }
 
-export function raidAttack(gid, userAcc, uid){
+// Xử lý một đòn đánh
+function raidAttack(gid, userAcc, uid) {
   const r = ensureRaidGuild(gid);
-  if (!r.boss || r.boss.hp<=0) return { error:'Chưa có boss hoặc boss đã bị hạ.' };
+  if (!r.boss || r.boss.hp <= 0) return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
 
   const cd = canAttack(r, uid);
-  if (!cd.ok) return { error:`⏳ Chờ ${Math.ceil(cd.left/1000)}s nữa.` };
+  if (!cd.ok) return { error: `⏳ Chờ ${Math.ceil(cd.left/1000)}s nữa.` };
 
-  const lv = Math.max(1, Number(userAcc?.level)||1);
-  const base = 8 + lv*1.8;
-  const rand = 3 + Math.floor(Math.random()*10);
-  const crit = Math.random()<0.12 ? 1.8 : 1;
-  const dmg  = Math.max(5, Math.round((base+rand)*crit));
-
-  r.boss.hp = Math.max(0, Number(r.boss.hp)-dmg);
-  r.contrib[uid] = (Number(r.contrib[uid])||0) + dmg;
+  const { dmg, crit } = rollDamage(userAcc);
+  r.boss.hp = Math.max(0, Number(r.boss.hp) - dmg);
+  r.contrib[uid] = (Number(r.contrib[uid]) || 0) + dmg;
   markCd(r, uid);
 
-  const ended = r.boss.hp<=0;
+  const ended = r.boss.hp <= 0;
   if (ended) r.lastEnd = NOW();
 
   saveRaid();
-  return { dmg, hp:r.boss.hp, maxHP:r.boss.maxHP, ended, crit:crit>1, reward:r.boss.reward||1 };
+  return { dmg, crit, hp: r.boss.hp, maxHP: r.boss.maxHP, ended, reward: r.boss.reward };
 }
 
-// ===== UI helper =====
-function buildStartEmbed(r){
+// UI helpers
+function hpBar(cur, max, len = 24) {
+  const p = Math.max(0, Math.min(1, Number(cur)/Number(max)));
+  const fill = Math.round(len * p);
+  return '█'.repeat(fill) + '░'.repeat(len - fill);
+}
+function buildStartEmbed(r) {
   return new EmbedBuilder()
     .setColor(r.boss?.color ?? 0x90caf9)
-    .setTitle(`🛡️ ${r.boss?.name || 'Boss'} đã xuất hiện!`)
-    .setDescription(`HP: **${r.boss.hp}/${r.boss.maxHP}**\nBấm nút để tấn công!`)
+    .setTitle(`${r.boss?.emoji || ''} ${r.boss?.name || 'Boss'} đã xuất hiện!`)
+    .setDescription(`HP: **${r.boss.hp}/${r.boss.maxHP}**\n\`${hpBar(r.boss.hp, r.boss.maxHP)}\`\nBấm nút để tấn công!`)
     .setImage(r.boss?.img || null);
 }
-function raidButtons(gid){
+function raidButtons(gid) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`raid_attack:${gid}`).setStyle(ButtonStyle.Danger).setEmoji('⚔️').setLabel('Tấn công'),
       new ButtonBuilder().setCustomId(`raid_status:${gid}`).setStyle(ButtonStyle.Secondary).setEmoji('📊').setLabel('Tình hình')
     )
   ];
-}
-async function pickSendableTextChannel(guild){
-  if (guild.systemChannel) return guild.systemChannel;
-  const chs = await guild.channels.fetch().catch(()=>null);
-  if (!chs) return null;
-  for (const [,ch] of chs) {
-    if (ch?.type===ChannelType.GuildText &&
-        ch.permissionsFor(guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return ch;
-  }
-  return null;
 }
 // ===== PLAYLIST STORE (persist to Railway volume) =====
 export const PLAYLISTS_FILE =
@@ -6929,47 +6958,65 @@ client.once(Events.ClientReady, async () => {
   }, 30*1000);
 });
 
+// ================= Button listener (boss-only) =================
 client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
-  const [kind, gid] = itx.customId.split(':');
+  const [kind, gid] = (itx.customId || '').split(':');
   if (!gid || !['raid_attack','raid_status'].includes(kind)) return;
 
   await loadRaid();
   const r = ensureRaidGuild(gid);
 
+  // ----- nút Tình hình
   if (kind === 'raid_status') {
-    if (!r.boss || r.boss.hp<=0) return itx.reply({ content:'Hiện không có boss.', ephemeral:true });
-    const top = Object.entries(r.contrib||{}).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    if (!r.boss || r.boss.hp <= 0) {
+      return itx.reply({ content: 'Hiện **không có boss** nào.', ephemeral: true });
+    }
+    const top = Object.entries(r.contrib || {}).sort((a,b)=>b[1]-a[1]).slice(0,10);
     const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
-      const m = await itx.guild?.members.fetch(uid).catch(()=>null);
-      const name = m?.displayName || uid;
+      const m = await itx.guild.members.fetch(uid).catch(()=>null);
+      const name = m?.displayName || `<@${uid}>`;
       return `**${i+1}.** ${name} — ${dmg} dmg`;
     }));
-    return itx.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(r.boss?.color ?? 0x90caf9)
-          .setTitle(`📊 ${r.boss?.name || 'Boss'}`)
-          .setDescription(`HP: **${r.boss.hp}/${r.boss.maxHP}**\n\n${lines.join('\n') || '—'}`)
-          .setImage(r.boss?.img || null)
-      ],
-      ephemeral:true
-    });
+    const B = r.boss;
+    const embed = new EmbedBuilder()
+      .setColor(B.color ?? 0x90caf9)
+      .setTitle(`${B.emoji || ''} ${B.name} — Tình hình`)
+      .setDescription([
+        `HP: **${B.hp}/${B.maxHP}**`,
+        `\`${hpBar(B.hp, B.maxHP)}\``,
+        B.note ? `> *${B.note}*` : ''
+      ].filter(Boolean).join('\n'))
+      .setImage(B.img || null)
+      .addFields({ name: 'Bảng xếp hạng', value: lines.join('\n') || 'Chưa có ai tấn công.' })
+      .setTimestamp(Date.now());
+
+    return itx.reply({ embeds: [embed], ephemeral: true });
   }
 
+  // ----- nút Tấn công
   if (kind === 'raid_attack') {
-    await loadWallets();
-    const acc = ensureWallet(itx.user.id);
+    if (!r.boss || r.boss.hp <= 0) {
+      return itx.reply({ content: 'Boss đã bị hạ hoặc chưa được gọi.', ephemeral: true });
+    }
 
-    const res = raidAttack(gid, acc, itx.user.id);
-    if (res.error) return itx.reply({ content:res.error, ephemeral:true });
+    // lấy ví để tính damage theo level + thưởng
+    const uid = itx.user.id;
+    const acc = ensureWallet ? ensureWallet(uid) : { level: 1 }; // dùng hệ work nếu có
+    const res = raidAttack(gid, acc, uid);
+    if (res.error) return itx.reply({ content: res.error, ephemeral: true });
 
-    const coin = Math.round((2 + res.dmg/3) * (res.reward||1));
-    const exp  = Math.round((1 + res.dmg/5) * (res.reward||1));
-    addCoinsUser(acc, coin);
-    addExpUser(acc, exp);
-    await saveWallets();
+    // thưởng coin/exp mỗi đòn
+    const { coins, exp } = rollReward(res.reward);
+    if (typeof addCoinsUser === 'function') addCoinsUser(acc, coins);
+    if (typeof addExpUser   === 'function') addExpUser(acc, exp);
+    if (typeof saveWallets  === 'function') await saveWallets();
 
-    return itx.reply({ content:`⚔️ **${itx.user.username}** gây **${res.dmg}**${res.crit?' (CRIT)':''} dmg. Boss còn **${res.hp}/${res.maxHP}** HP. (+${coin} coins, +${exp} EXP)`, ephemeral:true });
+    const name = itx.member?.displayName || itx.user.username;
+    return itx.reply({
+      content: `⚔️ **${name}** gây **${res.dmg}** dmg${res.crit?' (💥 chí mạng)':''}. ` +
+               `Boss còn **${res.hp}/${res.maxHP} HP**. (+${coins} coins, +${exp} EXP)`,
+      ephemeral: false
+    });
   }
 });

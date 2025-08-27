@@ -6853,9 +6853,9 @@ process.on('uncaughtException', (e) => console.error('UNCAUGHT', e));
 export const ensureAccount = ensureWallet;
 
 // ===== Button handler (ONE global listener) =====
-client.on(Events.InteractionCreate, async (itx) => {
-  if (!itx.isButton()) return;
-  if (!itx.customId.startsWith('work_job:')) return;
+client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) return;
+  const [action, gid] = (itx.customId || '').split(':');
+  if (!action?.startsWith('boss_')) return;
 
   await loadWallets();
   const uid = itx.user.id;

@@ -4241,46 +4241,65 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
     });
   }
 
-  // ====== BUY ======
-  if (sub === 'buy') {
-    const pet = ensurePet(uid);
-    if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
+  // ====== BUY (trừ coins từ ví /work) ======
+if (sub === 'buy') {
+  const pet = ensurePet(uid);
+  if (!pet) return interaction.reply({ content: 'Bạn chưa có pet. `/pet adopt` trước đã.', ephemeral: true });
 
-    const item = (interaction.options.getString('item', true) || '').toLowerCase();
-    const shop = {
-      'food':        { price:15, use:(p)=>{ p.hunger=clamp(p.hunger-35,0,100); p.hp=clamp(p.hp+5,0,100); } },
-      'deluxe_food': { price:40, use:(p)=>{ p.hunger=clamp(p.hunger-60,0,100); p.hp=clamp(p.hp+15,0,100);} },
-      'toy':         { price:20, use:(p)=>{ p.happy=clamp(p.happy+30,0,100); p.hunger=clamp(p.hunger+8,0,100);} },
-      'ball':        { price:10, use:(p)=>{ p.happy=clamp(p.happy+18,0,100);} },
-    };
-    const it = shop[item];
-    if (!it) return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
+  const item = (interaction.options.getString('item', true) || '').toLowerCase();
 
-    if (!trySpendCoins(pet, it.price)) {
-      return interaction.reply({ content: `Bạn không đủ coins. Cần ${it.price}, đang có ${pet.coins}.`, ephemeral: true });
-    }
-    it.use(pet);
-    gainExp(pet, 8);
-    pet.itemsBought = (pet.itemsBought || 0) + 1;
-    const unlock = checkAchievements(pet);
-    await savePets();
+  // danh mục shop (giữ nguyên hiệu ứng item)
+  const shop = {
+    'food':        { price: 15, use: p => { p.hunger = clamp(p.hunger - 35, 0, 100); p.hp = clamp(p.hp + 5, 0, 100); } },
+    'deluxe_food': { price: 40, use: p => { p.hunger = clamp(p.hunger - 60, 0, 100); p.hp = clamp(p.hp + 15, 0, 100); } },
+    'toy':         { price: 20, use: p => { p.happy  = clamp(p.happy + 30, 0, 100); p.hunger = clamp(p.hunger + 8, 0, 100); } },
+    'ball':        { price: 10, use: p => { p.happy  = clamp(p.happy + 18, 0, 100); } },
+  };
+  const it = shop[item];
+  if (!it) {
+    return interaction.reply({ content: 'Item không hợp lệ. Dùng `/pet shop` để xem danh sách.', ephemeral: true });
+  }
 
-    await interaction.reply({
-      content: `🛒 Đã mua **${item}** với giá ${it.price} coins. (Số dư: ${pet.coins})`,
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x80cbc4)
-          .addFields(
-            { name: '❤️ HP', value: bar(pet.hp), inline: true },
-            { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
-            { name: '😺 Vui', value: bar(pet.happy), inline: true },
-          )
-      ],
+  // >>> dùng ví /work
+  await loadWallets();
+  const acc = ensureWallet(uid);
+
+  if ((acc.coins || 0) < it.price) {
+    return interaction.reply({
+      content: `Bạn không đủ coins trong ví. Cần **${it.price}**, đang có **${acc.coins || 0}**.`,
       ephemeral: true
     });
-    if (unlock.length) interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
-    return;
   }
+
+  // trừ ví & áp dụng item cho pet
+  acc.coins = Math.max(0, Math.round((acc.coins || 0) - it.price));
+  it.use(pet);
+  gainExp(pet, 8);
+  pet.itemsBought = (pet.itemsBought || 0) + 1;
+  const unlock = checkAchievements(pet);
+
+  await saveWallets();
+  await savePets();
+
+  await interaction.reply({
+    content: `🛒 Đã mua **${item}** với giá **${it.price}** coins. (Số dư ví: **${acc.coins}**)`,
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x80cbc4)
+        .addFields(
+          { name: '❤️ HP', value: bar(pet.hp), inline: true },
+          { name: '🍗 No', value: bar(100 - pet.hunger), inline: true },
+          { name: '😺 Vui', value: bar(pet.happy), inline: true },
+        )
+    ],
+    ephemeral: true
+  });
+
+  if (unlock.length) {
+    interaction.channel?.send(`🏅 **${pet.name}** mở thành tựu: ${unlock.join(', ')}`).catch(()=>{});
+  }
+  return;
+}
 
   // ====== TOP ======
   if (sub === 'top') {

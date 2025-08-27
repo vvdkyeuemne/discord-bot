@@ -3624,28 +3624,56 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
     });
   }
 
+  // /shop buy
+  if (sub === 'buy') {
+    const id = (interaction.options.getString('item', true) || '').toLowerCase();
+    const item = CATALOG[id];
+    if (!item) {
+      return interaction.reply({ content: '❌ Vật phẩm không hợp lệ. Dùng `/shop list` để xem danh sách.', ephemeral: true });
+    }
+
+    const balance = Math.round(w.coins || 0);
+    if (balance < item.price) {
+      return interaction.reply({ content: `💸 Bạn không đủ coins. Cần **${item.price}**, đang có **${balance}**.`, ephemeral: true });
+    }
+
+    // trừ tiền + hiệu lực
+    w.coins = balance - item.price;
+    const extra = item.apply();
+
+    await saveWallets();
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x64dd17)
+          .setTitle('✅ Mua thành công')
+          .setDescription(`Bạn đã mua **${item.name}** với giá **${item.price}** coins.\n${extra}\n\nSố dư còn: **${w.coins}** coins.`)
+      ]
+    });
+  }
+}  
+
 // ==== /adminwork ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
-  // trả lời an toàn (kể cả đã defer/replied)
+  // defer ngay để giữ phiên
+  try { await interaction.deferReply({ ephemeral: true }); } catch {}
+
+  // helper trả lời an toàn
   const safeReply = async (payload) => {
     try {
-      if (interaction.deferred || interaction.replied) {
-        return interaction.editReply(payload);
-      }
+      if (interaction.deferred || interaction.replied) return interaction.editReply(payload);
       return interaction.reply({ ephemeral: true, ...payload });
     } catch {
       try { return interaction.followUp({ ephemeral: true, ...payload }); } catch {}
     }
   };
 
-  // defer NGAY để giữ phiên
-  try { await interaction.deferReply({ ephemeral: true }); } catch {}
-
   try {
-    // bắt event thực sự vào đây (debug)
+    // log để chắc chắn block này có chạy
     console.log('[adminwork] sub =', interaction.options.getSubcommand());
 
-    // chỉ admin / chủ server
+    // Chỉ Admin (hoặc chủ server)
     const isAdmin =
       interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
       interaction.guild?.ownerId === interaction.user.id;
@@ -3653,14 +3681,14 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
       return safeReply({ content: '⛔ Bạn cần quyền **Administrator** để dùng lệnh này.' });
     }
 
-    await loadWallets(); // utils ví bạn đã có
+    await loadWallets();
 
     const sub  = interaction.options.getSubcommand();
     const user = interaction.options.getUser('user', true);
     const uid  = user.id;
 
-    const acc  = ensureWallet(uid); // tạo/lấy ví
-    const fmt  = (n) => `${Math.round(Number(n) || 0)} coins`;
+    const acc = ensureWallet(uid); // utils của bạn
+    const fmtCoins = (n) => `${Math.round(Number(n) || 0)} coins`;
 
     if (sub === 'addcoins') {
       const amount = interaction.options.getInteger('amount', true);
@@ -3670,7 +3698,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
         embeds: [ new EmbedBuilder()
           .setColor(0x43a047)
           .setTitle('💰 Đã cộng coins')
-          .setDescription(`👤 ${user}\n+ **${fmt(amount)}**\nSố dư: **${fmt(acc.coins)}**`)
+          .setDescription(`👤 ${user}\n+ **${fmtCoins(amount)}**\nSố dư: **${fmtCoins(acc.coins)}**`)
         ]
       });
     }
@@ -3732,35 +3760,6 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
   } catch (e) {
     console.error('[adminwork error]', e);
     return safeReply({ content: '❌ Lỗi khi chạy /adminwork.' });
-  }
-}  
-  // /shop buy
-  if (sub === 'buy') {
-    const id = (interaction.options.getString('item', true) || '').toLowerCase();
-    const item = CATALOG[id];
-    if (!item) {
-      return interaction.reply({ content: '❌ Vật phẩm không hợp lệ. Dùng `/shop list` để xem danh sách.', ephemeral: true });
-    }
-
-    const balance = Math.round(w.coins || 0);
-    if (balance < item.price) {
-      return interaction.reply({ content: `💸 Bạn không đủ coins. Cần **${item.price}**, đang có **${balance}**.`, ephemeral: true });
-    }
-
-    // trừ tiền + hiệu lực
-    w.coins = balance - item.price;
-    const extra = item.apply();
-
-    await saveWallets();
-
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x64dd17)
-          .setTitle('✅ Mua thành công')
-          .setDescription(`Bạn đã mua **${item.name}** với giá **${item.price}** coins.\n${extra}\n\nSố dư còn: **${w.coins}** coins.`)
-      ]
-    });
   }
 }  
 // ==== /work ====

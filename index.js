@@ -6516,3 +6516,5 @@ function fmtTime(sec) {
 
 process.on('unhandledRejection', (r) => console.error('UNHANDLED', r));
 process.on('uncaughtException', (e) => console.error('UNCAUGHT', e));
+
+export const ensureAccount = ensureWallet;

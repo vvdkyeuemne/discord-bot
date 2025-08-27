@@ -6154,7 +6154,7 @@ export function fmtCoins(n) {
 const RAID_FILE =
   process.env.RAID_FILE ||
   (process.platform === 'win32'
-    ? require('path').join(process.cwd(), 'raid.json')
+    ? `${process.cwd()}/raid.json`
     : '/data/raid.json');
 
 let RaidDB = { guilds: {} };
@@ -6170,9 +6170,8 @@ function normalizeRaidGuild(g = {}) {
   };
 }
 
-// I/O
 async function loadRaid() {
-  const fs = require('fs/promises');
+  const fs = await import('fs/promises');
   try {
     const t = await fs.readFile(RAID_FILE, 'utf8');
     RaidDB = JSON.parse(t || '{"guilds":{}}');
@@ -6186,12 +6185,14 @@ async function loadRaid() {
 
 let _raidTimer = null;
 async function saveRaid() {
-  const fs = require('fs/promises');
+  const fs = await import('fs/promises');
   if (_raidTimer) clearTimeout(_raidTimer);
   _raidTimer = setTimeout(async () => {
     try {
       await fs.writeFile(RAID_FILE, JSON.stringify(RaidDB, null, 2), 'utf8');
-    } catch (e) { console.warn('saveRaid error:', e?.message || e); }
+    } catch (e) {
+      console.warn('saveRaid error:', e?.message || e);
+    }
   }, 300);
 }
 

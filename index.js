@@ -3626,40 +3626,41 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'shop') {
 
 // ==== /adminwork ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork') {
-  // helper trả lời an toàn
+  // trả lời an toàn (kể cả đã defer/replied)
   const safeReply = async (payload) => {
     try {
       if (interaction.deferred || interaction.replied) {
         return interaction.editReply(payload);
-      } else {
-        return interaction.reply({ ephemeral: true, ...payload });
       }
+      return interaction.reply({ ephemeral: true, ...payload });
     } catch {
-      // last resort
       try { return interaction.followUp({ ephemeral: true, ...payload }); } catch {}
     }
   };
 
-  // defer sớm để giữ phiên
+  // defer NGAY để giữ phiên
   try { await interaction.deferReply({ ephemeral: true }); } catch {}
 
   try {
-    // quyền: admin hoặc chủ server
+    // bắt event thực sự vào đây (debug)
+    console.log('[adminwork] sub =', interaction.options.getSubcommand());
+
+    // chỉ admin / chủ server
     const isAdmin =
       interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
       interaction.guild?.ownerId === interaction.user.id;
     if (!isAdmin) {
-      return safeReply({ content: '⛔ Bạn cần quyền **Administrator**.' });
+      return safeReply({ content: '⛔ Bạn cần quyền **Administrator** để dùng lệnh này.' });
     }
 
-    await loadWallets();
+    await loadWallets(); // utils ví bạn đã có
 
     const sub  = interaction.options.getSubcommand();
     const user = interaction.options.getUser('user', true);
     const uid  = user.id;
 
-    const acc  = ensureWallet(uid); // từ utils wallet
-    const fmtCoins = (n) => `${Math.round(Number(n) || 0)} coins`;
+    const acc  = ensureWallet(uid); // tạo/lấy ví
+    const fmt  = (n) => `${Math.round(Number(n) || 0)} coins`;
 
     if (sub === 'addcoins') {
       const amount = interaction.options.getInteger('amount', true);
@@ -3669,14 +3670,14 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
         embeds: [ new EmbedBuilder()
           .setColor(0x43a047)
           .setTitle('💰 Đã cộng coins')
-          .setDescription(`👤 ${user}\n+ **${fmtCoins(amount)}**\nSố dư: **${fmtCoins(acc.coins)}**`)
+          .setDescription(`👤 ${user}\n+ **${fmt(amount)}**\nSố dư: **${fmt(acc.coins)}**`)
         ]
       });
     }
 
     if (sub === 'addexp') {
       const amount = interaction.options.getInteger('amount', true);
-      addExpUser(acc, amount); // auto lên level theo utils
+      addExpUser(acc, amount);
       await saveWallets();
       return safeReply({
         embeds: [ new EmbedBuilder()
@@ -3703,12 +3704,12 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
 
     if (sub === 'boost') {
       const minutes = Math.max(1, interaction.options.getInteger('minutes', true));
-      acc.boostUntil = Date.now() + minutes * 60_000; // x2 lương trong N phút
+      acc.boostUntil = Date.now() + minutes * 60_000; // x2 lương
       await saveWallets();
       return safeReply({
         embeds: [ new EmbedBuilder()
           .setColor(0xab47bc)
-          .setTitle('⚡ Đã cấp boost x2 lương')
+          .setTitle('⚡ Cấp boost x2 lương')
           .setDescription(`👤 ${user}\nThời hạn: **${minutes} phút**`)
         ]
       });
@@ -3726,7 +3727,6 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'adminwork')
       });
     }
 
-    // sub không khớp
     return safeReply({ content: '❓ Subcommand không hợp lệ.' });
 
   } catch (e) {

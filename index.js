@@ -36,7 +36,7 @@ import {
 } from 'discord.js';
 
 // ===== Akinator (aki-api) =====
-import Aki from 'aki-api';
+import { Aki } from 'aki-api';
 
 const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
 const AKI_DEFAULT_REGION = 'en';
@@ -4123,45 +4123,50 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'boss') {
   return; // kết thúc xử lý /boss, tránh rơi xuống lệnh khác
 }
 
-// ==== /aki handler ====
+// ===== /aki handler =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'aki') {
-  const gid = interaction.guildId;
-  const uid = interaction.user.id;
+  const theme = interaction.options.getString('theme') || 'characters';
 
-  // nếu người này đang chơi rồi thì không cho mở thêm
-  const key = `${gid}:${uid}`;
-  if (AKI_SESS.has(key)) {
-    return interaction.reply({ content: 'Bạn đang chơi Akinator rồi. Dùng nút **Stop** để kết thúc.', ephemeral: true });
+  // Khởi tạo Akinator
+  const aki = new Aki({
+    region: AKI_DEFAULT_REGION,
+    childMode: false,
+    gameType: AKI_THEMES[theme] || 'characters',
+  });
+
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  try {
+    await aki.start();
+  } catch (e) {
+    return interaction.editReply({ content: 'Không khởi tạo được Akinator. Thử lại sau nhé!' });
   }
 
-  const theme  = interaction.options.getString('theme')  || AKI_THEMES.characters;
-  const region = interaction.options.getString('region') || AKI_DEFAULT_REGION;
+  const gid = interaction.guildId || 'dm';
+  const uid = interaction.user.id;
+  const key = `${gid}:${uid}`;
+  AKI_SESS.set(key, { aki, msgId: null });
 
-  // tạo session
-  const aki = new Aki({ region, childMode: false, proxy: undefined });
-  await aki.start();                       // bước đầu
-  if (aki.currentStep === -1) await aki.step(0); // đôi khi lib cần step(0)
-
-  // gửi câu hỏi + các nút
+  // UI lần đầu
   const embed = new EmbedBuilder()
-    .setColor(0x00a8ff)
+    .setColor(0x22c55e)
     .setTitle('🧞 Akinator')
-    .setDescription(`**Câu hỏi #${aki.currentStep + 1}:** ${aki.question}\n\nChọn câu trả lời bên dưới.`)
-    .setFooter({ text: `Theme: ${theme} • Region: ${region}` });
+    .setDescription(`**Q1.** ${aki.question}`)
+    .setFooter({ text: `Chủ đề: ${theme} • Tiến độ: ${aki.progress.toFixed(1)}%` });
 
+  // Hàng nút trả lời
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`aki:yes:${key}`).setLabel('Yes').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`aki:no:${key}`).setLabel('No').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`aki:idk:${key}`).setLabel('IDK').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`aki:probably:${key}`).setLabel('Probably').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`aki:back:${key}`).setLabel('Back').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:YES`).setStyle(ButtonStyle.Success).setLabel('Có'),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:NO`).setStyle(ButtonStyle.Danger).setLabel('Không'),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:DONT_KNOW`).setStyle(ButtonStyle.Secondary).setLabel('Không biết'),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB`).setStyle(ButtonStyle.Primary).setLabel('Có thể'),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB_NOT`).setStyle(ButtonStyle.Primary).setLabel('Có lẽ không'),
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`aki:stop:${key}`).setLabel('Stop').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:STOP`).setStyle(ButtonStyle.Secondary).setLabel('Dừng')
   );
 
-  const msg = await interaction.reply({ embeds: [embed], components: [row, row2], fetchReply: true });
-  AKI_SESS.set(key, { aki, msgId: msg.id });
+  const msg = await interaction.editReply({ embeds: [embed], components: [row, row2] });
+  AKI_SESS.get(key).msgId = msg.id;
 }
 
 // ==== /pet handler ====
@@ -7202,12 +7207,12 @@ client.on(Events.InteractionCreate, async (itx) => {
     const MAP = {
       YES: 'yes',
       NO: 'no',
-      DONT_KNOW: "don't know",
+      DONT_KNOW: "idk",
       PROB: 'probably',
       PROB_NOT: 'probably not',
     };
 
-    await aki.step(MAP[ans] || "don't know");
+    await aki.step(MAP[ans] || "idk");
 
     // Đến ngưỡng đoán → lấy gợi ý
     if (aki.progress >= 80 || aki.currentStep >= 20) {

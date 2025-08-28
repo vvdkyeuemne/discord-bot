@@ -983,13 +983,20 @@ new SlashCommandBuilder()
   .setDescription('Xem số dư coins của bạn'),
 
 new SlashCommandBuilder()
-    .setName('boss')
-    .setDescription('Boss server')
-    .addSubcommand(s => s.setName('start')
-      .setDescription('Gọi boss (quản trị viên)')
-      .addIntegerOption(o => o.setName('hp').setDescription('HP tuỳ chọn').setMinValue(100)))
-    .addSubcommand(s => s.setName('status').setDescription('Xem tình hình boss'))
-    .addSubcommand(s => s.setName('attack').setDescription('Tấn công boss')),
+  .setName('boss')
+  .setDescription('Quản lý Boss/Raid')
+  .addSubcommand(sc => sc.setName('start')
+    .setDescription('Gọi boss ngay (ngẫu nhiên nếu không chọn)')
+    .addStringOption(o => o.setName('id').setDescription('ID boss (slime/dragon/ancient/...)').setRequired(false))
+    .addIntegerOption(o => o.setName('hp').setDescription('Ép HP cụ thể').setRequired(false))
+  )
+  .addSubcommand(sc => sc.setName('status').setDescription('Xem tình hình boss hiện tại'))
+  .addSubcommand(sc => sc.setName('auto')
+    .setDescription('Bật/tắt tự spawn & giờ sinh')
+    .addStringOption(o => o.setName('enable').setDescription('on/off').setRequired(false))
+    .addStringOption(o => o.setName('times').setDescription('Giờ, vd: 09:00,13:00,19:00').setRequired(false))
+    .addStringOption(o => o.setName('tz').setDescription('Timezone, vd: Asia/Ho_Chi_Minh').setRequired(false))
+  ),
   
 new SlashCommandBuilder()
   .setName('playlist')
@@ -4012,38 +4019,40 @@ client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) retur
   } catch {}
 }); 
 
-// ================= Slash: /boss =================
+// ================= Handler /boss =================
 if (interaction.isChatInputCommand() && interaction.commandName === 'boss') {
   await loadRaid();
   const gid = interaction.guildId;
   const sub = interaction.options.getSubcommand();
+  const r   = ensureRaidGuild(gid);
 
-  // /boss start [hp] [boss_id]
+  // /boss start [id] [hp]
   if (sub === 'start') {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
       return interaction.reply({ content: 'Bạn cần quyền **Manage Server** để gọi boss.', ephemeral: true });
     }
-    const hp     = interaction.options.getInteger('hp') || null;
-    const bossId = interaction.options.getString('boss') || null;
+
+    const bossId = interaction.options.getString('id') || null;   // để trống = random
+    const hp     = interaction.options.getInteger('hp') || null;  // có thể null
 
     const ok = raidStart(gid, hp, bossId, interaction.guild);
-    if (!ok) return interaction.reply({ content: '⚠️ Boss đang tồn tại. Dùng `/boss status`.', ephemeral: true });
+    if (!ok) {
+      return interaction.reply({ content: '⚠️ Boss đang tồn tại. Dùng `/boss status`.', ephemeral: true });
+    }
 
-    const r = ensureRaidGuild(gid);
-    return interaction.reply({ embeds: [buildStartEmbed(r)], components: raidButtons(gid) });
+    const r2 = ensureRaidGuild(gid);
+    return interaction.reply({ embeds: [buildStartEmbed(r2)], components: raidButtons(gid) });
   }
 
   // /boss status
   if (sub === 'status') {
-    const r = ensureRaidGuild(gid);
     if (!r.boss || r.boss.hp <= 0) {
-      return interaction.reply({ content: 'Hiện **không có boss** nào đang hoạt động.', ephemeral: true });
+      return interaction.reply({ content: 'Hiện **không có boss** nào.', ephemeral: true });
     }
-
     const top = Object.entries(r.contrib || {}).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    const names = await Promise.all(top.map(async ([uid, dmg], i) => {
+    const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
       const m = await interaction.guild.members.fetch(uid).catch(()=>null);
-      const name = m?.displayName || `<@${uid}>`;
+      const name = m?.displayName || uid;
       return `**${i+1}.** ${name} — ${dmg} dmg`;
     }));
 
@@ -4054,15 +4063,41 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'boss') {
       .setDescription([
         `HP: **${B.hp}/${B.maxHP}**`,
         `\`${hpBar(B.hp, B.maxHP)}\``,
-        B.note ? `> *${B.note}*` : ''
+        B.note ? `*${B.note}*` : ''
       ].filter(Boolean).join('\n'))
       .setImage(B.img || null)
-      .addFields({ name: 'Bảng xếp hạng', value: names.join('\n') || 'Chưa có ai tấn công.' })
-      .setTimestamp(Date.now());
+      .addFields({ name: 'Bảng xếp hạng', value: lines.join('\n') || 'Chưa có ai tấn công.' })
+      .setTimestamp(new Date());
 
-    return interaction.reply({ embeds: [embed], components: raidButtons(gid) });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
+
+  // /boss auto [enable] [times] [tz]
+  if (sub === 'auto') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: 'Bạn cần quyền **Manage Server** để chỉnh auto.', ephemeral: true });
     }
+
+    const enStr = (interaction.options.getString('enable') || '').toLowerCase(); // on/off
+    const times = interaction.options.getString('times');                        // "09:00,13:00,19:00"
+    const tz    = interaction.options.getString('tz');                           // "Asia/Ho_Chi_Minh"
+
+    r.auto = r.auto || { enabled:true, tz:'Asia/Ho_Chi_Minh', times:['09:00','13:00','19:00','21:00'], lastSpawn:0 };
+    if (enStr === 'on')  r.auto.enabled = true;
+    if (enStr === 'off') r.auto.enabled = false;
+    if (times) r.auto.times = times.split(',').map(s => s.trim()).filter(Boolean);
+    if (tz)    r.auto.tz    = tz;
+
+    saveRaid();
+
+    return interaction.reply({
+      content: `Auto: **${r.auto.enabled ? 'ON' : 'OFF'}** • TZ: \`${r.auto.tz}\` • Times: \`${(r.auto.times||[]).join(', ')}\``,
+      ephemeral: true
+    });
+  }
+
+  return; // kết thúc xử lý /boss, tránh rơi xuống lệnh khác
+}
   
 // ==== /pet handler ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
@@ -6149,8 +6184,8 @@ export function fmtCoins(n) {
   return `${n}`;
       }
 
-// ====================== RAID / BOSS SYSTEM (drop-in) ======================
-// File DB ưu tiên volume /data trên Railway
+// ====================== RAID / BOSS SYSTEM (single-file block) ======================
+// DB path (ưu tiên volume /data trên Railway)
 const RAID_FILE =
   process.env.RAID_FILE ||
   (process.platform === 'win32'
@@ -6159,17 +6194,20 @@ const RAID_FILE =
 
 let RaidDB = { guilds: {} };
 
-// Chuẩn hoá 1 guild-raid record
+// Chuẩn hoá bản ghi raid cho từng guild
 function normalizeRaidGuild(g = {}) {
   return {
-    boss: g.boss && typeof g.boss === 'object' ? g.boss : null, // {id,name,emoji,color,img,hp,maxHP,reward,note,startedAt}
+    boss   : g.boss && typeof g.boss === 'object' ? g.boss : null, // {id,name,emoji,color,img,hp,maxHP,reward,note,startedAt}
     contrib: g.contrib && typeof g.contrib === 'object' ? g.contrib : {}, // uid -> dmg
-    cool: g.cool && typeof g.cool === 'object' ? g.cool : {},           // uid -> ts
-    auto: g.auto && typeof g.auto === 'object' ? g.auto : null,          // (tuỳ ý)
+    cool   : g.cool && typeof g.cool === 'object' ? g.cool : {},          // uid -> ts
+    auto   : g.auto && typeof g.auto === 'object'
+              ? g.auto
+              : { enabled: true, tz: 'Asia/Ho_Chi_Minh', times: ['09:00','13:00','19:00','21:00'], lastSpawn: 0 },
     lastEnd: Number(g.lastEnd) || 0
   };
 }
 
+// Load / Save
 async function loadRaid() {
   const fs = await import('fs/promises');
   try {
@@ -6182,28 +6220,22 @@ async function loadRaid() {
     RaidDB.guilds[gid] = normalizeRaidGuild(RaidDB.guilds[gid]);
   }
 }
-
 let _raidTimer = null;
 async function saveRaid() {
   const fs = await import('fs/promises');
   if (_raidTimer) clearTimeout(_raidTimer);
   _raidTimer = setTimeout(async () => {
-    try {
-      await fs.writeFile(RAID_FILE, JSON.stringify(RaidDB, null, 2), 'utf8');
-    } catch (e) {
-      console.warn('saveRaid error:', e?.message || e);
-    }
+    try { await fs.writeFile(RAID_FILE, JSON.stringify(RaidDB, null, 2), 'utf8'); }
+    catch (e) { console.warn('saveRaid error:', e?.message || e); }
   }, 300);
 }
-
 function ensureRaidGuild(gid) {
   if (!RaidDB.guilds[gid]) RaidDB.guilds[gid] = normalizeRaidGuild({});
   return RaidDB.guilds[gid];
 }
-
 const NOW = () => Date.now();
 
-// ============== BOSS CATALOG (merge: 3 cũ + 7 mới) ==============
+// ============== BOSS CATALOG (3 cũ + 7 mới) ==============
 const BOSSES = [
   // 3 boss cũ
   { id:'slime',   name:'King Slime',    emoji:'🟢', color:0x64b5f6,
@@ -6250,7 +6282,7 @@ const BOSSES = [
   { id:'mecha_titan', name:'Mecha Titan', emoji:'🤖', color:0x546e7a,
     img:'https://sv2.anhsieuviet.com/2025/08/27/mechatitan.gif',
     hpRange:[2000,2800], reward:{ coins:[45,95], exp:[26,42] },
-    note:'Cỗ máy hủy diệt – HP lớn, thưởng lớn.' },
+    note:'Cỗ máy huỷ diệt – HP lớn, thưởng lớn.' },
 
   { id:'void_specter', name:'Void Specter', emoji:'🌀👻', color:0x6a1b9a,
     img:'https://i.ibb.co/kgJ7rBst/spectre.gif',
@@ -6258,105 +6290,96 @@ const BOSSES = [
     note:'Vong hồn hư không – cân bằng exp/coin.' },
 ];
 
-// scale HP theo quy mô server (nhẹ)
-function scaleHP([min, max], guild) {
-  const base = min + Math.floor(Math.random() * (max - min + 1));
-  const size = Math.max(1, Math.min(5, Math.ceil((guild?.memberCount || 40) / 100)));
-  return Math.round(base * (1 + (size - 1) * 0.12)); // +12% mỗi 100 mem (tối đa x1.48)
+// scale HP nhẹ theo quy mô server
+function scaleHP([min,max], guild){
+  const base = min + Math.floor(Math.random()*(max-min+1));
+  const size = Math.max(1, Math.min(5, Math.ceil((guild?.memberCount||40)/100)));
+  return Math.round(base * (1 + (size-1)*0.12)); // +12% mỗi 100 mem (tối đa x1.48)
 }
-
 // chọn boss theo id hoặc ngẫu nhiên
-function pickBoss(metaId = null, guild = null) {
-  const b = metaId ? BOSSES.find(x => x.id === metaId) : BOSSES[Math.floor(Math.random() * BOSSES.length)];
+function pickBoss(metaId=null, guild=null){
+  const b = metaId ? BOSSES.find(x=>x.id===metaId) : BOSSES[Math.floor(Math.random()*BOSSES.length)];
   if (!b) return null;
   const hp = scaleHP(b.hpRange, guild);
-  return {
-    id: b.id, name: b.name, emoji: b.emoji, color: b.color, img: b.img,
-    hp, maxHP: hp, reward: b.reward, note: b.note
-  };
+  return { id:b.id, name:b.name, emoji:b.emoji, color:b.color, img:b.img, hp, maxHP:hp, reward:b.reward, note:b.note };
 }
 
 // Cooldown cá nhân khi attack
 const RAID_ATK_CD = 15 * 1000;
-function canAttack(r, uid) {
-  const left = Math.max(0, (Number(r.cool?.[uid]) || 0) - NOW());
-  return { ok: left <= 0, left };
+function canAttack(r, uid){
+  const left = Math.max(0, (Number(r.cool?.[uid])||0) - NOW());
+  return { ok: left<=0, left };
 }
-function markCd(r, uid) {
+function markCd(r, uid){
   r.cool = r.cool || {};
   r.cool[uid] = NOW() + RAID_ATK_CD;
 }
 
-// Damage & phần thưởng (theo level)
-function rollDamage(userAcc = { level:1 }) {
-  const lv = Math.max(1, Number(userAcc?.level) || 1);
-  const base = 8 + lv * 1.8;
-  const rand = 3 + Math.floor(Math.random() * 10);
-  const crit = Math.random() < 0.12 ? 1.8 : 1;
-  const dmg = Math.max(5, Math.round((base + rand) * crit));
-  return { dmg, crit: crit > 1 };
+// Roll damage / reward theo level & bảng boss
+function rollDamage(userAcc={ level:1 }){
+  const lv   = Math.max(1, Number(userAcc?.level)||1);
+  const base = 8 + lv*1.8;
+  const rand = 3 + Math.floor(Math.random()*10);
+  const crit = Math.random()<0.12 ? 1.8 : 1;
+  const dmg  = Math.max(5, Math.round((base+rand)*crit));
+  return { dmg, crit: crit>1 };
 }
-function rollReward(bossReward) {
+function rollReward(bossReward){
   const rng = (a,b)=> a + Math.floor(Math.random()*(b-a+1));
-  const coins = rng(bossReward.coins[0], bossReward.coins[1]);
-  const exp   = rng(bossReward.exp[0],   bossReward.exp[1]);
-  return { coins, exp };
+  return { coins: rng(bossReward.coins[0], bossReward.coins[1]),
+           exp  : rng(bossReward.exp[0],   bossReward.exp[1]) };
 }
 
 // Bắt đầu raid
-function raidStart(gid, hpOrNull = null, bossId = null, guildObj = null) {
+function raidStart(gid, hpOrNull=null, bossId=null, guildObj=null){
   const r = ensureRaidGuild(gid);
-  if (r.boss && Number(r.boss.hp) > 0) return false;
+  if (r.boss && Number(r.boss.hp)>0) return false;
 
   const meta = pickBoss(bossId, guildObj);
   if (!meta) return false;
+  if (Number(hpOrNull)) { meta.hp = meta.maxHP = Number(hpOrNull); }
 
-  // nếu admin ép HP cụ thể
-  if (Number(hpOrNull)) {
-    meta.hp = meta.maxHP = Number(hpOrNull);
-  }
-
-  r.boss = { ...meta, startedAt: NOW() };
+  r.boss    = { ...meta, startedAt: NOW() };
   r.contrib = {};
-  r.cool = {};
+  r.cool    = {};
   saveRaid();
   return true;
 }
 
-// Xử lý một đòn đánh
-function raidAttack(gid, userAcc, uid) {
+// Xử lý 1 đòn đánh
+function raidAttack(gid, userAcc, uid){
   const r = ensureRaidGuild(gid);
-  if (!r.boss || r.boss.hp <= 0) return { error: 'Chưa có boss hoặc boss đã bị hạ.' };
+  if (!r.boss || r.boss.hp<=0) return { error:'Chưa có boss hoặc boss đã bị hạ.' };
 
   const cd = canAttack(r, uid);
-  if (!cd.ok) return { error: `⏳ Chờ ${Math.ceil(cd.left/1000)}s nữa.` };
+  if (!cd.ok) return { error:`⏳ Chờ ${Math.ceil(cd.left/1000)}s nữa.` };
 
   const { dmg, crit } = rollDamage(userAcc);
   r.boss.hp = Math.max(0, Number(r.boss.hp) - dmg);
-  r.contrib[uid] = (Number(r.contrib[uid]) || 0) + dmg;
+  r.contrib[uid] = (Number(r.contrib[uid])||0) + dmg;
   markCd(r, uid);
 
-  const ended = r.boss.hp <= 0;
+  const ended = r.boss.hp<=0;
   if (ended) r.lastEnd = NOW();
 
   saveRaid();
-  return { dmg, crit, hp: r.boss.hp, maxHP: r.boss.maxHP, ended, reward: r.boss.reward };
+  return { dmg, crit, hp:r.boss.hp, maxHP:r.boss.maxHP, ended, reward:r.boss.reward };
 }
 
 // UI helpers
-function hpBar(cur, max, len = 24) {
+function hpBar(cur, max, len=24){
   const p = Math.max(0, Math.min(1, Number(cur)/Number(max)));
-  const fill = Math.round(len * p);
-  return '█'.repeat(fill) + '░'.repeat(len - fill);
+  const fill = Math.round(len*p);
+  return '█'.repeat(fill)+'░'.repeat(len-fill);
 }
-function buildStartEmbed(r) {
+function buildStartEmbed(r){
   return new EmbedBuilder()
     .setColor(r.boss?.color ?? 0x90caf9)
     .setTitle(`${r.boss?.emoji || ''} ${r.boss?.name || 'Boss'} đã xuất hiện!`)
     .setDescription(`HP: **${r.boss.hp}/${r.boss.maxHP}**\n\`${hpBar(r.boss.hp, r.boss.maxHP)}\`\nBấm nút để tấn công!`)
     .setImage(r.boss?.img || null);
 }
-function raidButtons(gid) {
+function raidButtons(gid){
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`raid_attack:${gid}`).setStyle(ButtonStyle.Danger).setEmoji('⚔️').setLabel('Tấn công'),
@@ -6364,6 +6387,29 @@ function raidButtons(gid) {
     )
   ];
 }
+
+// Tìm 1 kênh text mà bot có quyền gửi
+async function pickSendableTextChannel(guild) {
+  try {
+    if (!guild) return null;
+    const me = guild.members.me || await guild.members.fetchMe().catch(()=>null);
+    const canSend = (ch) => ch?.type===ChannelType.GuildText &&
+      ch.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages);
+    if (guild.systemChannel && canSend(guild.systemChannel)) return guild.systemChannel;
+    const coll = await guild.channels.fetch().catch(()=>null);
+    if (!coll) return null;
+    for (const [,ch] of coll) if (canSend(ch)) return ch;
+  } catch (_) {}
+  return null;
+}
+
+// Định dạng giờ phút theo tz
+function fmtHHMM(tz='Asia/Ho_Chi_Minh'){
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(new Date());
+}
+
 // ===== PLAYLIST STORE (persist to Railway volume) =====
 export const PLAYLISTS_FILE =
   process.env.PLAYLISTS_FILE ||
@@ -6929,32 +6975,8 @@ client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) retur
   return itx.reply({ embeds: [embed], ephemeral: true });
 });
 
-// tìm 1 kênh text mà bot có quyền gửi
-async function pickSendableTextChannel(guild) {
-  try {
-    if (!guild) return null;
 
-    // Ưu tiên system channel nếu có quyền
-    const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
-    const canSend = (ch) =>
-      ch?.type === ChannelType.GuildText &&
-      ch.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages);
-
-    if (guild.systemChannel && canSend(guild.systemChannel)) {
-      return guild.systemChannel;
-    }
-
-    // Duyệt các kênh text
-    const coll = await guild.channels.fetch().catch(() => null);
-    if (!coll) return null;
-
-    for (const [, ch] of coll) {
-      if (canSend(ch)) return ch;
-    }
-  } catch (_) {}
-  return null; // không tìm thấy kênh phù hợp
-}
-
+// ---------------- Auto-spawn theo giờ cố định ----------------
 client.once(Events.ClientReady, async () => {
   await loadRaid();
   setInterval(async () => {
@@ -6962,25 +6984,15 @@ client.once(Events.ClientReady, async () => {
       const r = ensureRaidGuild(gid);
       if (r.boss && r.boss.hp>0) continue;
 
-      const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:30','19:00','21:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
+      const auto = r.auto || (r.auto = { enabled:true, tz:'Asia/Ho_Chi_Minh', times:['09:00','13:00','19:00','21:00'], lastSpawn:0 });
       if (!auto.enabled) continue;
 
-// Giờ/phút theo múi giờ VN (hoặc truyền tz khác)
-function fmtHHMM(tz = 'Asia/Ho_Chi_Minh') {
-  return new Intl.DateTimeFormat('vi-VN', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).format(new Date());
-}
+      const hhmm   = fmtHHMM(auto.tz);
+      const should = Array.isArray(auto.times) && auto.times.includes(hhmm);
+      const cool   = NOW() - (Number(auto.lastSpawn)||0);
 
-    const hhmm   = fmtHHMM(auto.tz);
-const should = Array.isArray(auto.times) && auto.times.includes(hhmm);
-const cool   = NOW() - (Number(auto.lastSpawn) || 0);
-
-      if (should && cool > 4*60*1000) {
-        const meta = pickBoss();
+      if (should && cool > 4*60*1000) { // cách ~4 phút để tránh spam
+        const meta = pickBoss(null, guild);
         raidStart(gid, null, meta.id, guild);
         auto.lastSpawn = NOW();
         saveRaid();
@@ -7004,15 +7016,20 @@ client.on(Events.InteractionCreate, async (itx) => {
   await loadRaid();
   const r = ensureRaidGuild(gid);
 
-  // ----- nút Tình hình
+  // Luôn defer để tránh "Unknown interaction"
+  if (!itx.deferred && !itx.replied) {
+    await itx.deferReply({ ephemeral: true }).catch(()=>{});
+  }
+
+  // Nút Tình hình
   if (kind === 'raid_status') {
     if (!r.boss || r.boss.hp <= 0) {
-      return itx.reply({ content: 'Hiện **không có boss** nào.', ephemeral: true });
+      return itx.editReply({ content: 'Hiện **không có boss** nào.' }).catch(()=>{});
     }
     const top = Object.entries(r.contrib || {}).sort((a,b)=>b[1]-a[1]).slice(0,10);
     const lines = await Promise.all(top.map(async ([uid, dmg], i) => {
       const m = await itx.guild.members.fetch(uid).catch(()=>null);
-      const name = m?.displayName || `<@${uid}>`;
+      const name = m?.displayName || uid;
       return `**${i+1}.** ${name} — ${dmg} dmg`;
     }));
     const B = r.boss;
@@ -7022,38 +7039,42 @@ client.on(Events.InteractionCreate, async (itx) => {
       .setDescription([
         `HP: **${B.hp}/${B.maxHP}**`,
         `\`${hpBar(B.hp, B.maxHP)}\``,
-        B.note ? `> *${B.note}*` : ''
+        B.note ? `*${B.note}*` : ''
       ].filter(Boolean).join('\n'))
       .setImage(B.img || null)
-      .addFields({ name: 'Bảng xếp hạng', value: lines.join('\n') || 'Chưa có ai tấn công.' })
-      .setTimestamp(Date.now());
-
-    return itx.reply({ embeds: [embed], ephemeral: true });
+      .addFields({ name:'Bảng xếp hạng', value: lines.join('\n') || 'Chưa có ai tấn công.' })
+      .setTimestamp(new Date());
+    return itx.editReply({ content: '', embeds:[embed] }).catch(()=>{});
   }
 
-  // ----- nút Tấn công
+  // Nút Tấn công
   if (kind === 'raid_attack') {
     if (!r.boss || r.boss.hp <= 0) {
-      return itx.reply({ content: 'Boss đã bị hạ hoặc chưa được gọi.', ephemeral: true });
+      return itx.editReply({ content: 'Boss đã bị hạ hoặc chưa được gọi.' }).catch(()=>{});
     }
-
-    // lấy ví để tính damage theo level + thưởng
+    // Lấy ví để tính damage + thưởng
     const uid = itx.user.id;
-    const acc = ensureWallet ? ensureWallet(uid) : { level: 1 }; // dùng hệ work nếu có
-    const res = raidAttack(gid, acc, uid);
-    if (res.error) return itx.reply({ content: res.error, ephemeral: true });
+    const acc = typeof ensureWallet === 'function' ? ensureWallet(uid) : { level:1 };
 
-    // thưởng coin/exp mỗi đòn
+    const res = raidAttack(gid, acc, uid);
+    if (res.error) return itx.editReply({ content: res.error }).catch(()=>{});
+
+    // Thưởng coin/exp mỗi đòn
     const { coins, exp } = rollReward(res.reward);
     if (typeof addCoinsUser === 'function') addCoinsUser(acc, coins);
     if (typeof addExpUser   === 'function') addExpUser(acc, exp);
     if (typeof saveWallets  === 'function') await saveWallets();
 
     const name = itx.member?.displayName || itx.user.username;
-    return itx.reply({
-      content: `⚔️ **${name}** gây **${res.dmg}** dmg${res.crit?' (💥 chí mạng)':''}. ` +
-               `Boss còn **${res.hp}/${res.maxHP} HP**. (+${coins} coins, +${exp} EXP)`,
-      ephemeral: false
-    });
+    const rewardStr = `(+${fmtCoins ? fmtCoins(coins) : coins} coins, +${exp} EXP)`;
+    await itx.editReply({ content: `⚔️ **${name}** gây **${res.dmg}** dmg. Boss còn **${res.hp}/${res.maxHP} HP**. ${rewardStr}` }).catch(()=>{});
+
+    // Nếu chết thì thông báo chung vào kênh (nếu có)
+    if (res.ended) {
+      const ch = await pickSendableTextChannel(itx.guild).catch(()=>null);
+      if (ch) {
+        ch.send({ content: `🏆 **${r.boss.name}** đã bị hạ! Xin chúc mừng các dũng sĩ!` }).catch(()=>{});
+      }
+    }
   }
 });

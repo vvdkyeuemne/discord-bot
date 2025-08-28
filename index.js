@@ -40,10 +40,20 @@ import { Aki } from 'aki-api';
 
 // Fake browser headers cho mọi request (tránh 403)
 axios.defaults.headers.common['User-Agent'] =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 axios.defaults.headers.common['Accept-Language'] = 'en-US,en;q=0.9';
 axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
 axios.defaults.headers.common['Referer'] = 'https://en.akinator.com/';
+axios.defaults.headers.common['Origin'] = 'https://en.akinator.com';
+axios.defaults.headers.common['Connection'] = 'keep-alive';
+
+const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
+const AKI_DEFAULT_REGION = 'en';
+const AKI_THEMES = {
+  characters: 'characters',
+  animals: 'animals',
+  objects: 'objects',
+};
 
 import { EventEmitter } from 'node:events';
 EventEmitter.defaultMaxListeners = 25;
@@ -7160,10 +7170,6 @@ client.on(Events.InteractionCreate, async (itx) => {
 });
 
 // ===== Aki session store =====
-const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
-const AKI_DEFAULT_REGION = 'en';
-const AKI_THEMES = { characters: 'characters', animals: 'animals', objects: 'objects' };
-
 function akiAnswerIndex(tag) {
   // YES=0, NO=1, DONT_KNOW=2, PROB=3, PROB_NOT=4 (chuẩn của aki-api)
   switch (tag) {

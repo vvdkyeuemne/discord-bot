@@ -38,6 +38,13 @@ import {
 // ===== Akinator (aki-api) =====
 import { Aki } from 'aki-api';
 
+// Fake browser headers cho mọi request (tránh 403)
+axios.defaults.headers.common['User-Agent'] =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36';
+axios.defaults.headers.common['Accept-Language'] = 'en-US,en;q=0.9';
+axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
+axios.defaults.headers.common['Referer'] = 'https://en.akinator.com/';
+
 const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
 const AKI_DEFAULT_REGION = 'en';
 const AKI_THEMES = {
@@ -995,14 +1002,14 @@ new SlashCommandBuilder()
 
 new SlashCommandBuilder()
   .setName('aki')
-  .setDescription('Chơi Akinator đoán nhân vật/đồ vật/động vật')
+  .setDescription('Chơi đoán nhân vật cùng Akinator')
   .addStringOption(o =>
     o.setName('theme')
-     .setDescription('Chủ đề')
+     .setDescription('Chủ đề: characters / animals / objects')
      .addChoices(
-       { name: 'characters (nhân vật)', value: 'characters' },
-       { name: 'animals (động vật)',   value: 'animals'   },
-       { name: 'objects (đồ vật)',     value: 'objects'   },
+       { name: 'characters', value: 'characters' },
+       { name: 'animals', value: 'animals' },
+       { name: 'objects', value: 'objects' },
      )
   ),
 
@@ -4129,7 +4136,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'aki') {
 
   // Khởi tạo Akinator
   const aki = new Aki({
-    region: AKI_DEFAULT_REGION,
+    region: AKI_DEFAULT_REGION,   // 'en' ổn định
     childMode: false,
     gameType: AKI_THEMES[theme] || 'characters',
   });
@@ -4137,8 +4144,12 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'aki') {
   await interaction.deferReply({ ephemeral: true }).catch(() => {});
   try {
     await aki.start();
+    // (tuỳ chọn) ép header giống axios fake
+    if (aki?.requester?.instance?.defaults?.headers) {
+      aki.requester.instance.defaults.headers = axios.defaults.headers.common;
+    }
   } catch (e) {
-    return interaction.editReply({ content: 'Không khởi tạo được Akinator. Thử lại sau nhé!' });
+    return interaction.editReply({ content: '❌ Không khởi tạo được Akinator. Thử lại sau nhé!' });
   }
 
   const gid = interaction.guildId || 'dm';
@@ -4153,22 +4164,10 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'aki') {
     .setDescription(`**Q1.** ${aki.question}`)
     .setFooter({ text: `Chủ đề: ${theme} • Tiến độ: ${aki.progress.toFixed(1)}%` });
 
-  // Hàng nút trả lời
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:YES`).setStyle(ButtonStyle.Success).setLabel('Có'),
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:NO`).setStyle(ButtonStyle.Danger).setLabel('Không'),
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:DONT_KNOW`).setStyle(ButtonStyle.Secondary).setLabel('Không biết'),
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB`).setStyle(ButtonStyle.Primary).setLabel('Có thể'),
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB_NOT`).setStyle(ButtonStyle.Primary).setLabel('Có lẽ không'),
-  );
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:STOP`).setStyle(ButtonStyle.Secondary).setLabel('Dừng')
-  );
-
-  const msg = await interaction.editReply({ embeds: [embed], components: [row, row2] });
-  AKI_SESS.get(key).msgId = msg.id;
+  const msg = await interaction.editReply({ embeds: [embed], components: akiRows(gid, uid) });
+  const s = AKI_SESS.get(key);
+  if (s) s.msgId = msg.id;
 }
-
 // ==== /pet handler ====
 if (interaction.isChatInputCommand() && interaction.commandName === 'pet') {
   await loadPets();
@@ -7168,94 +7167,129 @@ client.on(Events.InteractionCreate, async (itx) => {
   }
 });
 
-// ===== Button listener cho Akinator =====
+// ===== Aki session store =====
+const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
+const AKI_DEFAULT_REGION = 'en';
+const AKI_THEMES = { characters: 'characters', animals: 'animals', objects: 'objects' };
+
+function akiAnswerIndex(tag) {
+  // YES=0, NO=1, DONT_KNOW=2, PROB=3, PROB_NOT=4 (chuẩn của aki-api)
+  switch (tag) {
+    case 'YES': return 0;
+    case 'NO': return 1;
+    case 'DONT_KNOW': return 2;
+    case 'PROB': return 3;
+    case 'PROB_NOT': return 4;
+    default: return 2;
+  }
+}
+
+function akiRows(gid, uid, disabled = false) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:YES`).setStyle(ButtonStyle.Success).setLabel('Có').setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:NO`).setStyle(ButtonStyle.Danger).setLabel('Không').setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:DONT_KNOW`).setStyle(ButtonStyle.Secondary).setLabel('Không biết').setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB`).setStyle(ButtonStyle.Primary).setLabel('Có thể').setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:PROB_NOT`).setStyle(ButtonStyle.Primary).setLabel('Có lẽ không').setDisabled(disabled),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`aki_ans:${gid}:${uid}:STOP`).setStyle(ButtonStyle.Secondary).setLabel('Dừng').setDisabled(disabled)
+  );
+  return [row, row2];
+}
+
+// ===== Akinator button handler (listener riêng) =====
 client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
   if (!itx.customId.startsWith('aki_ans:')) return;
 
-  const parts = itx.customId.split(':');     // ['aki_ans', gid, uid, ANSWER]
-  const gid = parts[1];
-  const uid = parts[2];
-  const ans = parts[3];
+  // customId: aki_ans:<gid>:<uid>:<TAG>
+  const parts = itx.customId.split(':');
+  const gid = itx.guildId || 'dm';
+  const targetGid = parts[1];
+  const ownerUid  = parts[2];
+  const tag       = parts[3] || 'DONT_KNOW';
 
-  // Chỉ chủ phòng được bấm
-  if (uid !== itx.user.id) {
-    return itx.reply({ content: 'Chỉ người bắt đầu phiên Akinator mới trả lời được.', ephemeral: true });
+  // Chặn người khác bấm ké
+  if (gid !== targetGid || itx.user.id !== ownerUid) {
+    return itx.reply({ content: '⛔ Đây không phải phiên Akinator của bạn.', ephemeral: true });
   }
 
-  const key = `${gid}:${uid}`;
+  const key = `${gid}:${ownerUid}`;
   const sess = AKI_SESS.get(key);
-  if (!sess) {
-    return itx.reply({ content: 'Phiên Akinator đã hết hoặc không hợp lệ.', ephemeral: true });
+  if (!sess?.aki) {
+    return itx.reply({ content: 'Phiên Akinator không tồn tại hoặc đã kết thúc.', ephemeral: true });
   }
 
-  // Luôn defer để tránh “unknown interaction”
+  // Ack sớm để tránh "interaction failed"
   if (!itx.deferred && !itx.replied) {
     await itx.deferUpdate().catch(() => {});
   }
 
+  const aki = sess.aki;
+
+  // Người chơi bấm dừng
+  if (tag === 'STOP') {
+    AKI_SESS.delete(key);
+    try {
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (msg) await msg.edit({ components: akiRows(gid, ownerUid, true) });
+    } catch {}
+    return;
+  }
+
+  // Trả lời 1 bước
   try {
-    const { aki, msgId } = sess;
+    await aki.step(akiAnswerIndex(tag));
+  } catch {
+    AKI_SESS.delete(key);
+    try {
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (msg) await msg.edit({ components: akiRows(gid, ownerUid, true) });
+    } catch {}
+    return itx.followUp({ content: '❌ Lỗi khi trả lời. Phiên đã kết thúc.', ephemeral: true }).catch(()=>{});
+  }
 
-    if (ans === 'STOP') {
-      AKI_SESS.delete(key);
-      await itx.followUp({ content: 'Đã dừng phiên Akinator.', ephemeral: true }).catch(() => {});
-      return;
-    }
-
-    // Map câu trả lời theo aki-api
-    const MAP = {
-      YES: 'yes',
-      NO: 'no',
-      DONT_KNOW: "idk",
-      PROB: 'probably',
-      PROB_NOT: 'probably not',
-    };
-
-    await aki.step(MAP[ans] || "idk");
-
-    // Đến ngưỡng đoán → lấy gợi ý
-    if (aki.progress >= 80 || aki.currentStep >= 20) {
+  // Nếu đủ tự tin → đoán
+  if (aki.progress >= 90 || aki.currentStep >= 78) {
+    try {
       await aki.win();
-
-      const g = aki.guesses?.[0];
-      if (!g) {
-        AKI_SESS.delete(key);
-        await itx.followUp({ content: 'Không đoán được ai 😵. Kết thúc phiên!', ephemeral: true }).catch(() => {});
-        return;
-      }
+      const g = aki.answers?.[0];
+      const guessName = g?.name || '???';
+      const desc = g?.description || '—';
+      const img = g?.absolute_picture_path || null;
 
       const embed = new EmbedBuilder()
         .setColor(0xf59e0b)
-        .setTitle('🧞 Akinator đoán…')
-        .setDescription(`**${g.name}**\n${g.description || ''}`)
-        .setImage(g.absolute_picture_path || null);
+        .setTitle(`🤔 Mình đoán là: **${guessName}**`)
+        .setDescription(desc)
+        .setImage(img)
+        .setFooter({ text: `Tin cậy: ${aki.progress.toFixed(1)}% • Bước: ${aki.currentStep}` });
 
-      // cập nhật message gốc (nếu còn)
-      try {
-        const ch = await itx.channel?.messages.fetch(msgId).catch(() => null);
-        if (ch) await ch.edit({ embeds: [embed], components: [] });
-      } catch {}
-
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (msg) await msg.edit({ embeds: [embed], components: akiRows(gid, ownerUid, true) });
+    } finally {
       AKI_SESS.delete(key);
-      await itx.followUp({ content: 'Xong rồi đó!', ephemeral: true }).catch(() => {});
-      return;
     }
+    return;
+  }
 
-    // Chưa đoán → tiếp câu hỏi tiếp theo
-    const next = new EmbedBuilder()
+  // Chưa đoán được → cập nhật câu hỏi
+  try {
+    const embed = new EmbedBuilder()
       .setColor(0x22c55e)
       .setTitle('🧞 Akinator')
       .setDescription(`**Q${aki.currentStep + 1}.** ${aki.question}`)
       .setFooter({ text: `Tiến độ: ${aki.progress.toFixed(1)}%` });
 
-    try {
-      const ch = await itx.channel?.messages.fetch(msgId).catch(() => null);
-      if (ch) await ch.edit({ embeds: [next] });
-    } catch {}
-
-  } catch (e) {
+    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [embed], components: akiRows(gid, ownerUid) });
+  } catch {
     AKI_SESS.delete(key);
-    await itx.followUp({ content: 'Có lỗi khi xử lý Akinator. Phiên đã dừng.', ephemeral: true }).catch(() => {});
+    try {
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (msg) await msg.edit({ components: akiRows(gid, ownerUid, true) });
+    } catch {}
+    await itx.followUp({ content: '❌ Có lỗi xảy ra, kết thúc phiên.', ephemeral: true }).catch(()=>{});
   }
 });

@@ -7163,59 +7163,94 @@ client.on(Events.InteractionCreate, async (itx) => {
   }
 });
 
-// ===== button aki =====
-if (itx.isButton() && itx.customId.startsWith('aki:')) {
-  const parts = itx.customId.split(':'); // ['aki','action','gid:uid']
-  const action = parts[1];
-  const key = parts.slice(2).join(':');  // gid:uid
+// ===== Button listener cho Akinator =====
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  if (!itx.customId.startsWith('aki_ans:')) return;
+
+  const parts = itx.customId.split(':');     // ['aki_ans', gid, uid, ANSWER]
+  const gid = parts[1];
+  const uid = parts[2];
+  const ans = parts[3];
+
+  // Chỉ chủ phòng được bấm
+  if (uid !== itx.user.id) {
+    return itx.reply({ content: 'Chỉ người bắt đầu phiên Akinator mới trả lời được.', ephemeral: true });
+  }
+
+  const key = `${gid}:${uid}`;
   const sess = AKI_SESS.get(key);
-  if (!sess) return itx.reply({ content: 'Phiên Akinator đã hết hoặc không hợp lệ.', ephemeral: true });
+  if (!sess) {
+    return itx.reply({ content: 'Phiên Akinator đã hết hoặc không hợp lệ.', ephemeral: true });
+  }
 
-  const { aki } = sess;
-
-  // map action -> answer code của aki-api
-  const answerMap = {
-    yes: 0, no: 1, idk: 2, probably: 3, probablynot: 4
-  };
+  // Luôn defer để tránh “unknown interaction”
+  if (!itx.deferred && !itx.replied) {
+    await itx.deferUpdate().catch(() => {});
+  }
 
   try {
-    if (action === 'stop') {
+    const { aki, msgId } = sess;
+
+    if (ans === 'STOP') {
       AKI_SESS.delete(key);
-      return itx.reply({ content: 'Đã dừng trò chơi Akinator.', ephemeral: true });
-    }
-    if (action === 'back') {
-      await aki.back();
-    } else {
-      const ans = answerMap[action];
-      if (ans == null) return itx.reply({ content: 'Hành động không hợp lệ.', ephemeral: true });
-      await aki.step(ans);
+      await itx.followUp({ content: 'Đã dừng phiên Akinator.', ephemeral: true }).catch(() => {});
+      return;
     }
 
-    // đủ chắc thì guess
-    if (aki.progress >= 80 || aki.currentStep > 70) {
+    // Map câu trả lời theo aki-api
+    const MAP = {
+      YES: 'yes',
+      NO: 'no',
+      DONT_KNOW: "don't know",
+      PROB: 'probably',
+      PROB_NOT: 'probably not',
+    };
+
+    await aki.step(MAP[ans] || "don't know");
+
+    // Đến ngưỡng đoán → lấy gợi ý
+    if (aki.progress >= 80 || aki.currentStep >= 20) {
       await aki.win();
-      const g = aki.answers[0]; // best guess
+
+      const g = aki.guesses?.[0];
+      if (!g) {
+        AKI_SESS.delete(key);
+        await itx.followUp({ content: 'Không đoán được ai 😵. Kết thúc phiên!', ephemeral: true }).catch(() => {});
+        return;
+      }
 
       const embed = new EmbedBuilder()
-        .setColor(0xf1c40f)
-        .setTitle('🤔 Akinator đoán là…')
+        .setColor(0xf59e0b)
+        .setTitle('🧞 Akinator đoán…')
         .setDescription(`**${g.name}**\n${g.description || ''}`)
-        .setImage(g.absolute_picture_path || null)
-        .setFooter({ text: `Độ chắc chắn: ${Math.round(g.proba * 100)}%` });
+        .setImage(g.absolute_picture_path || null);
+
+      // cập nhật message gốc (nếu còn)
+      try {
+        const ch = await itx.channel?.messages.fetch(msgId).catch(() => null);
+        if (ch) await ch.edit({ embeds: [embed], components: [] });
+      } catch {}
 
       AKI_SESS.delete(key);
-      return itx.update({ embeds: [embed], components: [] });
+      await itx.followUp({ content: 'Xong rồi đó!', ephemeral: true }).catch(() => {});
+      return;
     }
 
-    // chưa đoán, hiển thị câu tiếp theo
-    const embed = new EmbedBuilder()
-      .setColor(0x00a8ff)
+    // Chưa đoán → tiếp câu hỏi tiếp theo
+    const next = new EmbedBuilder()
+      .setColor(0x22c55e)
       .setTitle('🧞 Akinator')
-      .setDescription(`**Câu hỏi #${aki.currentStep + 1}:** ${aki.question}\n\nChọn câu trả lời bên dưới.`);
+      .setDescription(`**Q${aki.currentStep + 1}.** ${aki.question}`)
+      .setFooter({ text: `Tiến độ: ${aki.progress.toFixed(1)}%` });
 
-    return itx.update({ embeds: [embed] });
+    try {
+      const ch = await itx.channel?.messages.fetch(msgId).catch(() => null);
+      if (ch) await ch.edit({ embeds: [next] });
+    } catch {}
+
   } catch (e) {
     AKI_SESS.delete(key);
-    return itx.reply({ content: 'Có lỗi xảy ra với phiên Akinator. Đã kết thúc.', ephemeral: true });
+    await itx.followUp({ content: 'Có lỗi khi xử lý Akinator. Phiên đã dừng.', ephemeral: true }).catch(() => {});
   }
-}
+});

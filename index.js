@@ -6936,7 +6936,7 @@ client.once(Events.ClientReady, async () => {
       const r = ensureRaidGuild(gid);
       if (r.boss && r.boss.hp>0) continue;
 
-      const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:00','19:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
+      const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:00','19:00','21:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
       if (!auto.enabled) continue;
 
 // Giờ/phút theo múi giờ VN (hoặc truyền tz khác)
@@ -6948,6 +6948,10 @@ function fmtHHMM(tz = 'Asia/Ho_Chi_Minh') {
     hour12: false
   }).format(new Date());
 }
+
+    const hhmm   = fmtHHMM(auto.tz);
+const should = Array.isArray(auto.times) && auto.times.includes(hhmm);
+const cool   = NOW() - (Number(auto.lastSpawn) || 0);
 
       if (should && cool > 4*60*1000) {
         const meta = pickBoss();

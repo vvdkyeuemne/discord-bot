@@ -6929,6 +6929,32 @@ client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) retur
   return itx.reply({ embeds: [embed], ephemeral: true });
 });
 
+// tìm 1 kênh text mà bot có quyền gửi
+async function pickSendableTextChannel(guild) {
+  try {
+    if (!guild) return null;
+
+    // Ưu tiên system channel nếu có quyền
+    const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
+    const canSend = (ch) =>
+      ch?.type === ChannelType.GuildText &&
+      ch.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages);
+
+    if (guild.systemChannel && canSend(guild.systemChannel)) {
+      return guild.systemChannel;
+    }
+
+    // Duyệt các kênh text
+    const coll = await guild.channels.fetch().catch(() => null);
+    if (!coll) return null;
+
+    for (const [, ch] of coll) {
+      if (canSend(ch)) return ch;
+    }
+  } catch (_) {}
+  return null; // không tìm thấy kênh phù hợp
+}
+
 client.once(Events.ClientReady, async () => {
   await loadRaid();
   setInterval(async () => {
@@ -6936,7 +6962,7 @@ client.once(Events.ClientReady, async () => {
       const r = ensureRaidGuild(gid);
       if (r.boss && r.boss.hp>0) continue;
 
-      const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:00','19:00','21:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
+      const auto = r.auto || (r.auto = { enabled:true, times:['09:00','13:30','19:00','21:00'], tz:'Asia/Ho_Chi_Minh', lastSpawn:0 });
       if (!auto.enabled) continue;
 
 // Giờ/phút theo múi giờ VN (hoặc truyền tz khác)

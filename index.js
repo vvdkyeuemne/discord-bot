@@ -6931,50 +6931,69 @@ process.on('uncaughtException', (e) => console.error('UNCAUGHT', e));
 
 export const ensureAccount = ensureWallet;
 
-// ===== Button handler (ONE global listener) =====
-client.on(Events.InteractionCreate, async (itx) => {  if (!itx.isButton()) return;
-  const [action, gid] = (itx.customId || '').split(':');
-  if (!action?.startsWith('boss_')) return;
+// ===== Button handler cho /work (an toàn 3s) =====
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  if (!itx.customId.startsWith('work_job:')) return;
 
-  await loadWallets();
-  const uid = itx.user.id;
-  const acc = ensureWallet(uid);
+  try {
+    // Luôn defer để giữ phiên tương tác
+    if (!itx.deferred && !itx.replied) {
+      await itx.deferReply({ ephemeral: true }).catch(() => {});
+    }
 
-  const jobId = itx.customId.split(':')[1];
-  const job = JOBS.find(j => j.id === jobId);
-  if (!job) return itx.reply({ content: '❌ Công việc không hợp lệ.', ephemeral: true });
+    await loadWallets();
+    const uid = itx.user.id;
+    const acc = ensureWallet(uid);
 
-  if ((acc.level || 1) < job.req) {
-    return itx.reply({ content: `🚫 Cần **Level ${job.req}**.`, ephemeral: true });
+    // job id
+    const jobId = itx.customId.split(':')[1];
+    const job = JOBS.find(j => j.id === jobId);
+    if (!job) {
+      return itx.editReply({ content: '❌ Công việc không hợp lệ.' }).catch(() => {});
+    }
+
+    // đủ level?
+    if ((acc.level || 1) < job.req) {
+      return itx.editReply({ content: `🚫 Bạn cần **Level ${job.req}** mới làm được.` }).catch(() => {});
+    }
+
+    // cooldown
+    const left = workLeftMs(acc);
+    if (left > 0) {
+      const m = Math.ceil(left / 60000);
+      return itx.editReply({ content: `⏳ Bạn cần chờ **${m} phút** nữa.` }).catch(() => {});
+    }
+
+    // boost x2?
+    const mult = (Number(acc.boostUntil) || 0) > Date.now() ? 2 : 1;
+
+    // lương + exp
+    const earn = Math.round((job.min + Math.floor(Math.random() * (job.max - job.min + 1))) * mult);
+    addCoinsUser(acc, earn);
+    addExpUser(acc, job.exp);
+    acc.lastWork = Date.now();
+    await saveWallets();
+
+    const embed = new EmbedBuilder()
+      .setColor(0x4caf50)
+      .setTitle(`${job.title} — Ca làm xong!`)
+      .setDescription([
+        `• Lương: **${fmtCoins(earn)}** coins${mult > 1 ? ' (x2 boost)' : ''}`,
+        `• Tổng: **${fmtCoins(acc.coins)}** coins`,
+        `• Exp: **${acc.exp}/${(acc.level || 1) * 100}** (Lv.${acc.level || 1})`
+      ].join('\n'))
+      .setTimestamp(new Date());
+
+    return itx.editReply({ embeds: [embed] }).catch(() => {});
+  } catch (e) {
+    console.warn('[work button] error:', e);
+    // Nếu có sự cố vẫn cố gắng phản hồi để tránh "interaction failed"
+    if (itx.deferred && !itx.replied) {
+      await itx.editReply({ content: '❌ Có lỗi xảy ra, thử lại nhé.' }).catch(() => {});
+    }
   }
-
-  const left = workLeftMs(acc);
-  if (left > 0) {
-    const m = Math.ceil(left/60000);
-    return itx.reply({ content: `⏳ Chờ **${m} phút** nữa.`, ephemeral: true });
-  }
-
-  const mult = (Number(acc.boostUntil) || 0) > Date.now() ? 2 : 1;
-  const earn = Math.round((job.min + Math.floor(Math.random()*(job.max - job.min + 1))) * mult);
-
-  addCoinsUser(acc, earn);
-  addExpUser(acc, job.exp);
-  acc.lastWork = Date.now();
-  await saveWallets();
-
-  const embed = new EmbedBuilder()
-    .setColor(0x4caf50)
-    .setTitle(`${job.title} — Ca làm xong!`)
-    .setDescription([
-      `• Lương: **${fmtCoins(earn)}** coins${mult>1?' (x2 boost)':''}`,
-      `• Tổng: **${fmtCoins(acc.coins)}** coins`,
-      `• Exp: **${acc.exp}/${(acc.level||1)*100}** (Lv.${acc.level||1})`
-    ].join('\n'))
-    .setTimestamp(new Date());
-
-  return itx.reply({ embeds: [embed], ephemeral: true });
 });
-
 
 // ---------------- Auto-spawn theo giờ cố định ----------------
 client.once(Events.ClientReady, async () => {

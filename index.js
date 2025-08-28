@@ -45,14 +45,6 @@ axios.defaults.headers.common['Accept-Language'] = 'en-US,en;q=0.9';
 axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
 axios.defaults.headers.common['Referer'] = 'https://en.akinator.com/';
 
-const AKI_SESS = new Map(); // key = `${gid}:${uid}` -> { aki, msgId }
-const AKI_DEFAULT_REGION = 'en';
-const AKI_THEMES = {
-  characters: 'characters',
-  animals: 'animals',
-  objects: 'objects',
-};
-
 import { EventEmitter } from 'node:events';
 EventEmitter.defaultMaxListeners = 25;
 

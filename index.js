@@ -495,21 +495,21 @@ const MILL_BANK = [
   { q: "Biểu tượng quả táo cắn dở là?", a:["Microsoft","Samsung","Apple","Sony"], ok:2, diff:"easy" },
 ];
 
-// Hàm dịch ngắn gọn
+// ===== Translate helper (retry + fallback) =====
 async function translateText(text, to = 'vi', tries = 2) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await translate(String(text || ''), { to });
+      // LƯU Ý: gọi gtrans.default(...) vì import namespace
+      const res = await gtrans.default(String(text || ''), { to });
       const out = (res && res.text) ? String(res.text).trim() : '';
-      // nếu dịch về rỗng thì coi như fail
-      if (out) return out;
+      if (out) return out; // thành công
     } catch (err) {
       lastErr = err;
     }
   }
   if (lastErr) console.error('Translate error:', lastErr);
-  return String(text || '');
+  return String(text || ''); // fallback giữ nguyên EN
 }
 
 // Lấy 1 câu hỏi từ OpenTDB (dịch sang Việt)

@@ -372,17 +372,22 @@ const QUIZ_BANK = [
 ];
 
 function quizPick() {
-  // 1/3 xác suất tạo phép tính ngẫu nhiên cho đa dạng
+  // 1/3 xác suất tạo phép tính ngẫu nhiên
   if (Math.random() < 0.33) {
     const x = Math.floor(Math.random() * 20) + 5;
     const y = Math.floor(Math.random() * 12) + 3;
     const z = Math.floor(Math.random() * 8) + 2;
-    const ans = x + y * z;
+
+    const ans  = x + y * z;                       // đáp án dạng number
     const opts = [ans, ans + 2, ans - 3, ans + 5].sort(() => Math.random() - 0.5);
-    return { q: `${x} + ${y} × ${z} = ?`, a: opts.map(String), ok: opts.indexOf(String(ans)) };
+
+    // TÌM VỊ TRÍ THEO NUMBER, KHÔNG ÉP STRING
+    const ok = opts.indexOf(ans);
+
+    return { q: `${x} + ${y} × ${z} = ?`, a: opts.map(String), ok };
   }
 
-  // LẤY TỪ BANK: dùng đúng khóa 'correct'
+  // Lấy từ bank: dùng đúng key 'correct'
   const item = QUIZ_BANK[Math.floor(Math.random() * QUIZ_BANK.length)];
   return { q: item.q, a: [...item.a], ok: item.correct };
 }

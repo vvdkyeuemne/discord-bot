@@ -6,6 +6,10 @@
 // - Voice: đợi READY + xử lý Stage Channel + thêm logs
 // ===========================================================
 
+if (typeof globalThis.MILL_BANNER_URL === 'undefined') {
+  globalThis.MILL_BANNER_URL = 'https://sv2.anhsieuviet.com/2025/08/29/latest.png';
+}
+
 import 'dotenv/config';
 import express from 'express';
 import axios from 'axios';
@@ -466,14 +470,13 @@ const MILL_FILE =
   process.env.MILL_FILE ||
   (process.platform === 'win32' ? `${process.cwd()}/million.json` : '/data/million.json');
 
-const MILL_LADDER = [
-  0, 200, 400, 600, 1_000, 2_000,
-  3_000, 6_000, 10_000, 14_000, 22_000,
-  30_000, 40_000, 60_000, 85_000, 150_000
-]; // index 0..15 (câu 1 -> 200, ... câu 15 -> 150k)
+// ==== Millionaire constants (top-level) ====
+const MILL_LADDER = [0, 200000, 400000, /* ... */ 1000000000]; // ví dụ
+const MILL_BANNER_URL =
+  process.env.MILL_BANNER_URL ||
+  'https://sv2.anhsieuviet.com/2025/08/29/latest.png';
 
 const MILL_TIMEOUT = 30_000; // 30s/câu
-const MILL_BANNER_URL = 'https://sv2.anhsieuviet.com/2025/08/29/latest.png';
 
 const millNow = () => Date.now();
 const millNonce = () => Math.random().toString(36).slice(2) + millNow().toString(36);
@@ -528,8 +531,16 @@ async function millPickQuestion(step) {
 // UI
 function millEmbed(session) {
   const { step, q, a, used, startedAt } = session;
-  const money = MILL_LADDER[step];
-  const footer = `Câu ${step}/15 • Tiền: ${money.toLocaleString()} • Trợ giúp: 50:50${used.fifty?'✅':'❌'} | Hỏi KN${used.audience?'✅':'❌'} | Bỏ qua${used.skip?'✅':'❌'}`;
+  const money = MILL_LADDER[step] || 0;
+
+  const footer =
+    `Câu ${step}/15 • Tiền: ${money.toLocaleString()} • ` +
+    `Trợ giúp: 50:50${used?.fifty?'✅':'❌'} | Hỏi KN${used?.audience?'✅':'❌'} | Bỏ qua${used?.skip?'✅':'❌'}`;
+
+  const banner = (typeof MILL_BANNER_URL === 'string' && MILL_BANNER_URL.length)
+    ? MILL_BANNER_URL
+    : null;
+
   return new EmbedBuilder()
     .setColor(0x8bc34a)
     .setTitle('💰 Ai là Triệu Phú')
@@ -541,7 +552,7 @@ function millEmbed(session) {
       `C. ${a[2]}`,
       `D. ${a[3]}`
     ].join('\n'))
-    .setImage(MiLL_BANNER_URL)
+    .setImage(banner)               // OK nếu banner != null
     .setFooter({ text: footer })
     .setTimestamp(startedAt ? new Date(startedAt) : new Date());
 }

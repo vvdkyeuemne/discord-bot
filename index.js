@@ -1752,58 +1752,69 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   try {// ===== /quiz handler =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
-  await interaction.deferReply({ ephemeral: true }).catch(()=>{});
+  // defer để tránh Unknown interaction (v14 có thể dùng flags thay ephemeral)
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
 
-  // tạo câu hỏi
-  const picked = quizPick();
-  if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4) {
-    return interaction.editReply({ content: '⚠️ Không thể tạo câu hỏi lúc này.' });
-  }
-
-  const gid = interaction.guildId || 'dm';
-  const uid = interaction.user.id;
-  const nonce = quizNonce();
-  const key = `${gid}:${uid}:${nonce}`;
-
-  const embed = new EmbedBuilder()
-    .setColor(0x00bcd4)
-    .setTitle('🧠 Quiz nhanh!')
-    .setDescription([
-      `**Câu hỏi:** ${picked.q}`,
-      '',
-      `A. ${picked.a[0]}`,
-      `B. ${picked.a[1]}`,
-      `C. ${picked.a[2]}`,
-      `D. ${picked.a[3]}`
-    ].join('\n'))
-    .setFooter({ text: 'Bạn có 30 giây để trả lời.' })
-    .setTimestamp(new Date());
-
-  const msg = await interaction.editReply({
-    embeds: [embed],
-    components: quizRows(gid, uid, nonce),
-  });
-
-  // lưu session
-  QUIZ_SESS.set(key, {
-    correct: picked.ok,
-    msgId: msg.id,
-    expiresAt: quizNow() + 30_000,
-  });
-
-  // auto-expire sau 30s: disable nút nếu chưa trả lời
-  setTimeout(async () => {
-    const sess = QUIZ_SESS.get(key);
-    if (!sess) return;
-    if (quizNow() >= sess.expiresAt) {
-      QUIZ_SESS.delete(key);
-      try {
-        const ch = interaction.channel;
-        const m = await ch?.messages.fetch(sess.msgId).catch(()=>null);
-        if (m) await m.edit({ components: quizRows(gid, uid, nonce, true) }).catch(()=>{});
-      } catch {}
+  try {
+    // !!! dùng đúng tên hàm quizPick (KHÔNG phải pickQuiz)
+    const picked = quizPick();
+    if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4) {
+      return interaction.editReply({ content: '⚠️ Không thể tạo câu hỏi lúc này.' });
     }
-  }, 31_000);
+
+    const gid   = interaction.guildId || 'dm';
+    const uid   = interaction.user.id;
+    const nonce = quizNonce();
+    const key   = `${gid}:${uid}:${nonce}`;
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00bcd4)
+      .setTitle('🧠 Quiz nhanh!')
+      .setDescription([
+        `**Câu hỏi:** ${picked.q}`,
+        '',
+        `A. ${picked.a[0]}`,
+        `B. ${picked.a[1]}`,
+        `C. ${picked.a[2]}`,
+        `D. ${picked.a[3]}`
+      ].join('\n'))
+      .setFooter({ text: 'Bạn có 30 giây để trả lời.' })
+      .setTimestamp(new Date());
+
+    const msg = await interaction.editReply({
+      embeds: [embed],
+      components: quizRows(gid, uid, nonce),
+    });
+
+    // lưu session
+    QUIZ_SESS.set(key, {
+      correct: picked.ok,
+      msgId: msg.id,
+      expiresAt: Date.now() + 30_000,
+    });
+
+    // tự hết hạn sau 30s
+    setTimeout(async () => {
+      const sess = QUIZ_SESS.get(key);
+      if (!sess) return;
+      if (Date.now() >= sess.expiresAt) {
+        QUIZ_SESS.delete(key);
+        try {
+          const m = await interaction.channel?.messages.fetch(sess.msgId).catch(()=>null);
+          if (m) await m.edit({ components: quizRows(gid, uid, nonce, true) }).catch(()=>{});
+        } catch {}
+      }
+    }, 31_000);
+
+  } catch (err) {
+    console.error('quiz cmd error:', err);
+    // vẫn đảm bảo có reply
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Có lỗi xảy ra, thử lại nhé.', flags: MessageFlags.Ephemeral }).catch(()=>{});
+    } else {
+      await interaction.editReply({ content: 'Có lỗi xảy ra, thử lại nhé.' }).catch(()=>{});
+    }
+  }
 }
 
     // ====== /coin ======
@@ -7073,25 +7084,23 @@ client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
   if (!itx.customId.startsWith('quiz_ans:')) return;
 
-  // customId: quiz_ans:<gid>:<uid>:<nonce>:<idx>
-  const [ , gid, ownerUid, nonce, idxStr ] = itx.customId.split(':');
-  const key = `${gid}:${ownerUid}:${nonce}`;
-  const sess = QUIZ_SESS.get(key);
-
-  // luôn ack ngay để tránh "Unknown interaction"
+  // Luôn ack sớm để tránh Unknown interaction
   if (!itx.deferred && !itx.replied) {
     await itx.deferUpdate().catch(()=>{});
   }
 
-  // kiểm tra quyền người trả lời
+  const [ , gid, ownerUid, nonce, idxStr ] = itx.customId.split(':');
+  const key = `${gid}:${ownerUid}:${nonce}`;
+  const sess = QUIZ_SESS.get(key);
+
   if (itx.user.id !== ownerUid) {
-    return itx.followUp({ content: '⛔ Chỉ người mở quiz mới được trả lời.', ephemeral: true }).catch(()=>{});
+    return itx.followUp({ content: '⛔ Chỉ người mở quiz mới trả lời được.', ephemeral: true }).catch(()=>{});
   }
 
   if (!sess) {
     return itx.followUp({ content: '⌛ Câu hỏi đã hết hạn hoặc đã trả lời.', ephemeral: true }).catch(()=>{});
   }
-  if (quizNow() >= sess.expiresAt) {
+  if (Date.now() >= sess.expiresAt) {
     QUIZ_SESS.delete(key);
     try {
       const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
@@ -7100,29 +7109,24 @@ client.on(Events.InteractionCreate, async (itx) => {
     return itx.followUp({ content: '⌛ Hết thời gian trả lời.', ephemeral: true }).catch(()=>{});
   }
 
-  const pick = Number(idxStr);
+  const pick    = Number(idxStr);
   const correct = Number(sess.correct);
 
-  // hiển thị ✅/❌ trên nút
-  const labels = ['A', 'B', 'C', 'D'].map((t,i) => {
+  const labels = ['A','B','C','D'].map((t,i) => {
     if (i === correct) return `✅ ${t}`;
     if (i === pick && pick !== correct) return `❌ ${t}`;
     return t;
   });
 
-  // khóa session
   QUIZ_SESS.delete(key);
 
-  // disable nút + update label
   try {
     const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
     if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true, labels) }).catch(()=>{});
   } catch {}
 
-  // thông báo kết quả (ephemeral để gọn)
-  if (pick === correct) {
-    await itx.followUp({ content: '🎉 Chính xác! Bạn giỏi đấy.', ephemeral: true }).catch(()=>{});
-  } else {
-    await itx.followUp({ content: `❌ Sai rồi. Đáp án đúng là **${['A','B','C','D'][correct]}**.`, ephemeral: true }).catch(()=>{});
-  }
+  await itx.followUp({
+    content: pick === correct ? '🎉 Chính xác!' : `❌ Sai. Đáp án đúng là **${['A','B','C','D'][correct]}**.`,
+    ephemeral: true
+  }).catch(()=>{});
 });

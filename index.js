@@ -1752,11 +1752,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   try {// ===== /quiz handler =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
-  // defer để tránh Unknown interaction (v14 có thể dùng flags thay ephemeral)
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
   try {
-    // !!! dùng đúng tên hàm quizPick (KHÔNG phải pickQuiz)
     const picked = quizPick();
     if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4) {
       return interaction.editReply({ content: '⚠️ Không thể tạo câu hỏi lúc này.' });
@@ -1786,14 +1784,12 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
       components: quizRows(gid, uid, nonce),
     });
 
-    // lưu session
     QUIZ_SESS.set(key, {
       correct: picked.ok,
       msgId: msg.id,
       expiresAt: Date.now() + 30_000,
     });
 
-    // tự hết hạn sau 30s
     setTimeout(async () => {
       const sess = QUIZ_SESS.get(key);
       if (!sess) return;
@@ -1808,15 +1804,13 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
 
   } catch (err) {
     console.error('quiz cmd error:', err);
-    // vẫn đảm bảo có reply
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Có lỗi xảy ra, thử lại nhé.', flags: MessageFlags.Ephemeral }).catch(()=>{});
+      await interaction.reply({ content: 'Có lỗi xảy ra, thử lại nhé.', ephemeral: true }).catch(()=>{});
     } else {
       await interaction.editReply({ content: 'Có lỗi xảy ra, thử lại nhé.' }).catch(()=>{});
     }
   }
 }
-
     // ====== /coin ======
     if (interaction.commandName === 'coin') {
       const sub = interaction.options.getSubcommand();
@@ -6860,7 +6854,6 @@ client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
   if (!itx.customId.startsWith('quiz_ans:')) return;
 
-  // Luôn ack sớm để tránh Unknown interaction
   if (!itx.deferred && !itx.replied) {
     await itx.deferUpdate().catch(()=>{});
   }

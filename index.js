@@ -1750,7 +1750,7 @@ const workLeftMs = (acc) => Math.max(0, (Number(acc.lastWork)||0) + WORK_CD - Da
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // ===== /quiz handler =====
+  try {// ===== /quiz handler =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
   await interaction.deferReply({ ephemeral: true }).catch(()=>{});
 

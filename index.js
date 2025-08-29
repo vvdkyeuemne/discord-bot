@@ -17,6 +17,7 @@ import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import gtrans from '@vitalets/google-translate-api';
 
 import {
   Client,
@@ -495,24 +496,57 @@ const MILL_BANK = [
   { q: "Biểu tượng quả táo cắn dở là?", a:["Microsoft","Samsung","Apple","Sony"], ok:2, diff:"easy" },
 ];
 
-// (Optional) Lấy câu hỏi từ OpenTDB (tiếng Anh) rồi dịch sang Việt (nếu bạn có gtrans)
-async function fetchOpenTDBOne(difficulty="easy") {
+// Hàm dịch ngắn gọn
+async function translateText(text, to = 'vi') {
   try {
-    const res = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986&difficulty=${difficulty}`);
+    const res = await gtrans(text, { to });
+    return res?.text || text;
+  } catch (err) {
+    console.error("Translate error:", err);
+    return text; // fallback: giữ nguyên nếu lỗi
+  }
+}
+
+// Lấy 1 câu hỏi từ OpenTDB (dịch sang Việt)
+async function fetchOpenTDBOne(difficulty = "easy") {
+  try {
+    const res = await fetch(
+      `https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986&difficulty=${difficulty}`
+    );
     const data = await res.json();
     if (!data || data.response_code !== 0 || !data.results?.length) return null;
-    const it = data.results[0];
-    // decode
-    const dec = (s)=> decodeURIComponent(s || '');
-    const q = dec(it.question);
-    const correct = dec(it.correct_answer);
-    const incorrects = (it.incorrect_answers || []).map(dec);
-    const opts = [...incorrects, correct];
-    // shuffle & find ok index
-    for (let i=opts.length-1;i>0;i--) { const j = Math.floor(Math.random()*(i+1)); [opts[i],opts[j]]=[opts[j],opts[i]]; }
-    const ok = opts.indexOf(correct);
-    return { q, a:opts, ok, diff: it.difficulty || difficulty };
-  } catch { return null; }
+
+    const item = data.results[0];
+
+    const decode = (s = '') => decodeURIComponent(s);
+
+    // Câu hỏi & đáp án gốc (EN)
+    const qEN = decode(item.question);
+    const okEN = decode(item.correct_answer);
+    const ngEN = (item.incorrect_answers || []).map(decode);
+
+    // Dịch sang Tiếng Việt
+    const [qVI, okVI, ...ngVI] = await Promise.all([
+      translateText(qEN, 'vi'),
+      translateText(okEN, 'vi'),
+      ...ngEN.map(x => translateText(x, 'vi'))
+    ]);
+
+    // Trộn đáp án
+    const opts = [okVI, ...ngVI].sort(() => Math.random() - 0.5);
+    const okIndex = opts.indexOf(okVI);
+
+    return {
+      q: qVI,
+      a: opts,
+      ok: okIndex,
+      diff: item.difficulty || difficulty
+    };
+
+  } catch (err) {
+    console.error("fetchOpenTDBOne error:", err);
+    return null;
+  }
 }
 
 // Chọn câu: ưu tiên API, fail thì dùng bank nội bộ

@@ -1521,7 +1521,6 @@ if (typeof addBadge === 'function') {
           .setColor(0x5865F2);
           await interaction.followUp({ embeds:[embed], components:[row] });
           
-      }
 } catch { await interaction.followUp('⚠️ Lấy meme thất bại.'); }
         return;
       }

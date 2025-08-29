@@ -327,10 +327,48 @@ const quizNonce = () => Math.random().toString(36).slice(2) + quizNow().toString
 
 // vài câu hỏi mẫu (bạn muốn có nhiều thì thêm vào đây)
 const QUIZ_BANK = [
-  { q: 'Thủ đô của Nhật Bản là?', a: ['Osaka', 'Kyoto', 'Tokyo', 'Nagoya'], ok: 2 },
-  { q: '2 + 2 × 3 = ?',            a: ['8', '10', '6', '12'],               ok: 0 }, // 2+6=8
-  { q: 'Nguyên tố có ký hiệu Fe?', a: ['Đồng', 'Sắt', 'Bạc', 'Chì'],        ok: 1 },
-  { q: 'Trái Đất quay quanh gì?',  a: ['Mặt Trăng', 'Sao Hỏa', 'Mặt Trời', 'Sao Kim'], ok: 2 },
+  // Địa lý
+  { q: "Thủ đô của Nhật Bản là?", a: ["Osaka", "Kyoto", "Tokyo", "Nagoya"], correct: 2 },
+  { q: "Quốc gia nào có diện tích lớn nhất thế giới?", a: ["Trung Quốc", "Mỹ", "Nga", "Canada"], correct: 2 },
+  { q: "Con sông dài nhất thế giới?", a: ["Amazon", "Nile", "Yangtze", "Mississippi"], correct: 1 },
+  { q: "Sa mạc lớn nhất thế giới?", a: ["Sahara", "Gobi", "Kalahari", "Arabia"], correct: 0 },
+  { q: "Đỉnh núi cao nhất thế giới?", a: ["Everest", "K2", "Kilimanjaro", "Matterhorn"], correct: 0 },
+  { q: "Biển nào nhỏ nhất thế giới?", a: ["Biển Đỏ", "Biển Baltic", "Biển Caribbean", "Biển Marmara"], correct: 3 },
+
+  // Lịch sử
+  { q: "Ai là người đầu tiên đặt chân lên Mặt Trăng?", a: ["Buzz Aldrin", "Yuri Gagarin", "Neil Armstrong", "Michael Collins"], correct: 2 },
+  { q: "Chiến tranh thế giới thứ hai kết thúc năm nào?", a: ["1940", "1942", "1945", "1950"], correct: 2 },
+  { q: "Người sáng lập đế chế Mông Cổ?", a: ["Attila", "Alexander", "Genghis Khan", "Tamerlane"], correct: 2 },
+  { q: "Bức tường Berlin sụp đổ vào năm nào?", a: ["1985", "1987", "1989", "1991"], correct: 2 },
+  { q: "Ai là tổng thống đầu tiên của Hoa Kỳ?", a: ["Abraham Lincoln", "George Washington", "John Adams", "Thomas Jefferson"], correct: 1 },
+
+  // Khoa học
+  { q: "Nguyên tố hóa học có ký hiệu O là gì?", a: ["Vàng", "Oxy", "Bạc", "Nitơ"], correct: 1 },
+  { q: "Hành tinh nào gần Mặt Trời nhất?", a: ["Sao Thủy", "Sao Kim", "Trái Đất", "Sao Hỏa"], correct: 0 },
+  { q: "Ai phát minh ra bóng đèn điện?", a: ["Tesla", "Einstein", "Edison", "Newton"], correct: 2 },
+  { q: "Tốc độ ánh sáng trong chân không ~ bao nhiêu?", a: ["300,000 km/s", "150,000 km/s", "3,000 km/s", "1,000 km/s"], correct: 0 },
+  { q: "Nước chiếm khoảng bao nhiêu % cơ thể người?", a: ["30%", "50%", "60%", "80%"], correct: 2 },
+  { q: "Máy tính đầu tiên ENIAC ra đời vào khoảng năm nào?", a: ["1925", "1945", "1960", "1970"], correct: 1 },
+
+  // Văn hóa - giải trí
+  { q: "Bộ truyện nào có nhân vật Luffy?", a: ["Naruto", "One Piece", "Bleach", "Dragon Ball"], correct: 1 },
+  { q: "Ai là tác giả của Harry Potter?", a: ["Tolkien", "J.K. Rowling", "George R.R. Martin", "Suzanne Collins"], correct: 1 },
+  { q: "Hãng phim nào tạo ra chuột Mickey?", a: ["Pixar", "Disney", "DreamWorks", "Sony"], correct: 1 },
+  { q: "Bộ phim nào đoạt nhiều Oscar nhất?", a: ["Avatar", "Titanic", "Ben-Hur", "The Lord of the Rings: Return of the King"], correct: 3 },
+  { q: "Ca sĩ nào được mệnh danh là 'Ông hoàng nhạc Pop'?", a: ["Elvis Presley", "Michael Jackson", "Justin Bieber", "Freddie Mercury"], correct: 1 },
+
+  // Công nghệ
+  { q: "Ai là CEO đầu tiên của Microsoft?", a: ["Steve Jobs", "Bill Gates", "Elon Musk", "Jeff Bezos"], correct: 1 },
+  { q: "Ngôn ngữ nào được dùng để tạo ra trang web?", a: ["Python", "HTML", "C++", "Java"], correct: 1 },
+  { q: "Logo hệ điều hành Android là hình con gì?", a: ["Con mèo", "Con robot", "Con ong", "Con khỉ"], correct: 1 },
+  { q: "Google được thành lập vào năm nào?", a: ["1995", "1998", "2001", "2005"], correct: 1 },
+  { q: "Biểu tượng quả táo cắn dở là logo của hãng nào?", a: ["Microsoft", "Samsung", "Apple", "Sony"], correct: 2 },
+
+  // Thể thao
+  { q: "Quốc gia nào vô địch World Cup 2018?", a: ["Đức", "Pháp", "Brazil", "Argentina"], correct: 1 },
+  { q: "Số huy chương vàng Olympic nhiều nhất thuộc về vận động viên nào?", a: ["Usain Bolt", "Michael Phelps", "Larisa Latynina", "Carl Lewis"], correct: 1 },
+  { q: "Bóng đá được cho là bắt nguồn từ quốc gia nào?", a: ["Anh", "Brazil", "Hy Lạp", "Ý"], correct: 0 },
+  { q: "Roger Federer là vận động viên của môn thể thao nào?", a: ["Bóng rổ", "Quần vợt", "Bơi lội", "Bóng đá"], correct: 1 },
 ];
 
 function quizPick() {

@@ -7098,4 +7098,5 @@ await itx.followUp({
       ? `🎉 Chính xác! (+1 điểm • Tổng: **${totalPts ?? '—'}**)`
       : `❌ Sai. Đáp án đúng là **${['A','B','C','D'][correct]}**.`,
   ephemeral: true
-}).catch(()=>{});
+}).catch(()=>{});                                     
+});

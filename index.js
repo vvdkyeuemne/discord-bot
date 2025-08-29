@@ -327,48 +327,106 @@ const quizNonce = () => Math.random().toString(36).slice(2) + quizNow().toString
 
 // vài câu hỏi mẫu (bạn muốn có nhiều thì thêm vào đây)
 const QUIZ_BANK = [
-  // Địa lý
+  // === ĐỊA LÝ ===
   { q: "Thủ đô của Nhật Bản là?", a: ["Osaka", "Kyoto", "Tokyo", "Nagoya"], correct: 2 },
-  { q: "Quốc gia nào có diện tích lớn nhất thế giới?", a: ["Trung Quốc", "Mỹ", "Nga", "Canada"], correct: 2 },
+  { q: "Quốc gia có diện tích lớn nhất thế giới?", a: ["Trung Quốc", "Mỹ", "Nga", "Canada"], correct: 2 },
   { q: "Con sông dài nhất thế giới?", a: ["Amazon", "Nile", "Yangtze", "Mississippi"], correct: 1 },
   { q: "Sa mạc lớn nhất thế giới?", a: ["Sahara", "Gobi", "Kalahari", "Arabia"], correct: 0 },
   { q: "Đỉnh núi cao nhất thế giới?", a: ["Everest", "K2", "Kilimanjaro", "Matterhorn"], correct: 0 },
   { q: "Biển nào nhỏ nhất thế giới?", a: ["Biển Đỏ", "Biển Baltic", "Biển Caribbean", "Biển Marmara"], correct: 3 },
+  { q: "Thủ đô của Úc là?", a: ["Sydney", "Canberra", "Melbourne", "Perth"], correct: 1 },
+  { q: "Thủ đô của Canada là?", a: ["Toronto", "Vancouver", "Ottawa", "Montreal"], correct: 2 },
+  { q: "Quốc gia có nhiều đảo nhất?", a: ["Indonesia", "Na Uy", "Thụy Điển", "Philippines"], correct: 2 },
+  { q: "Châu lục có diện tích nhỏ nhất?", a: ["Châu Úc", "Châu Âu", "Châu Nam Cực", "Châu Phi"], correct: 0 },
+  { q: "Hồ nước ngọt lớn nhất thế giới theo thể tích?", a: ["Baikal", "Superior", "Victoria", "Michigan"], correct: 0 },
+  { q: "Núi Phú Sĩ (Fuji) thuộc nước nào?", a: ["Trung Quốc", "Nhật Bản", "Hàn Quốc", "Đài Loan"], correct: 1 },
+  { q: "Sông nào chảy qua Paris?", a: ["Seine", "Danube", "Thames", "Rhine"], correct: 0 },
+  { q: "Thác Niagara nằm giữa Mỹ và nước nào?", a: ["Mexico", "Canada", "Cuba", "Bahamas"], correct: 1 },
+  { q: "Sa mạc Gobi thuộc hai quốc gia nào?", a: ["Trung Quốc & Ấn Độ", "Trung Quốc & Mông Cổ", "Kazakhstan & Nga", "Iran & Iraq"], correct: 1 },
 
-  // Lịch sử
+  // === LỊCH SỬ ===
   { q: "Ai là người đầu tiên đặt chân lên Mặt Trăng?", a: ["Buzz Aldrin", "Yuri Gagarin", "Neil Armstrong", "Michael Collins"], correct: 2 },
-  { q: "Chiến tranh thế giới thứ hai kết thúc năm nào?", a: ["1940", "1942", "1945", "1950"], correct: 2 },
+  { q: "Thế chiến II kết thúc năm nào?", a: ["1940", "1942", "1945", "1950"], correct: 2 },
   { q: "Người sáng lập đế chế Mông Cổ?", a: ["Attila", "Alexander", "Genghis Khan", "Tamerlane"], correct: 2 },
-  { q: "Bức tường Berlin sụp đổ vào năm nào?", a: ["1985", "1987", "1989", "1991"], correct: 2 },
-  { q: "Ai là tổng thống đầu tiên của Hoa Kỳ?", a: ["Abraham Lincoln", "George Washington", "John Adams", "Thomas Jefferson"], correct: 1 },
+  { q: "Bức tường Berlin sụp đổ vào năm?", a: ["1985", "1987", "1989", "1991"], correct: 2 },
+  { q: "Tổng thống đầu tiên của Hoa Kỳ?", a: ["Abraham Lincoln", "George Washington", "John Adams", "Thomas Jefferson"], correct: 1 },
+  { q: "Đế chế Inca nằm ở khu vực nào?", a: ["Bắc Phi", "Nam Mỹ", "Đông Á", "Tây Âu"], correct: 1 },
+  { q: "Ai phát minh bảng chữ cái Cyrillic?", a: ["Cyril & Methodius", "Aristotle", "Hipparchus", "Ptolemy"], correct: 0 },
+  { q: "Con đường Tơ lụa nối Trung Quốc với khu vực nào?", a: ["Châu Phi", "Châu Đại Dương", "Châu Âu", "Bắc Mỹ"], correct: 2 },
+  { q: "Nhà thám hiểm phát hiện ra châu Mỹ năm 1492?", a: ["Columbus", "Magellan", "da Gama", "Cook"], correct: 0 },
+  { q: "Vạn Lý Trường Thành chủ yếu xây dưới triều đại?", a: ["Hán", "Đường", "Minh", "Tần"], correct: 3 },
 
-  // Khoa học
-  { q: "Nguyên tố hóa học có ký hiệu O là gì?", a: ["Vàng", "Oxy", "Bạc", "Nitơ"], correct: 1 },
-  { q: "Hành tinh nào gần Mặt Trời nhất?", a: ["Sao Thủy", "Sao Kim", "Trái Đất", "Sao Hỏa"], correct: 0 },
-  { q: "Ai phát minh ra bóng đèn điện?", a: ["Tesla", "Einstein", "Edison", "Newton"], correct: 2 },
-  { q: "Tốc độ ánh sáng trong chân không ~ bao nhiêu?", a: ["300,000 km/s", "150,000 km/s", "3,000 km/s", "1,000 km/s"], correct: 0 },
+  // === KHOA HỌC TỰ NHIÊN ===
+  { q: "Nguyên tố có ký hiệu O?", a: ["Vàng", "Oxy", "Bạc", "Nitơ"], correct: 1 },
+  { q: "Hành tinh gần Mặt Trời nhất?", a: ["Sao Thủy", "Sao Kim", "Trái Đất", "Sao Hỏa"], correct: 0 },
+  { q: "Ai phát minh ra bóng đèn điện sợi đốt thương mại?", a: ["Tesla", "Einstein", "Edison", "Newton"], correct: 2 },
+  { q: "Tốc độ ánh sáng trong chân không xấp xỉ?", a: ["300,000 km/s", "150,000 km/s", "3,000 km/s", "1,000 km/s"], correct: 0 },
   { q: "Nước chiếm khoảng bao nhiêu % cơ thể người?", a: ["30%", "50%", "60%", "80%"], correct: 2 },
-  { q: "Máy tính đầu tiên ENIAC ra đời vào khoảng năm nào?", a: ["1925", "1945", "1960", "1970"], correct: 1 },
+  { q: "Đơn vị đo cường độ dòng điện?", a: ["Volt", "Ohm", "Ampere", "Watt"], correct: 2 },
+  { q: "Khí chiếm phần lớn trong không khí?", a: ["Oxy", "Hydro", "Nitơ", "Cacbonic"], correct: 2 },
+  { q: "Hành tinh nào có vòng nổi tiếng?", a: ["Sao Kim", "Sao Thổ", "Sao Hải Vương", "Sao Thiên Vương"], correct: 1 },
+  { q: "Lượng tử ánh sáng gọi là gì?", a: ["Proton", "Photon", "Neutron", "Boson W"], correct: 1 },
+  { q: "Đại dương lớn nhất?", a: ["Ấn Độ Dương", "Đại Tây Dương", "Bắc Băng Dương", "Thái Bình Dương"], correct: 3 },
+  { q: "Quá trình cây xanh tạo ra oxy gọi là?", a: ["Quang hợp", "Hô hấp", "Lên men", "Bay hơi"], correct: 0 },
 
-  // Văn hóa - giải trí
-  { q: "Bộ truyện nào có nhân vật Luffy?", a: ["Naruto", "One Piece", "Bleach", "Dragon Ball"], correct: 1 },
-  { q: "Ai là tác giả của Harry Potter?", a: ["Tolkien", "J.K. Rowling", "George R.R. Martin", "Suzanne Collins"], correct: 1 },
-  { q: "Hãng phim nào tạo ra chuột Mickey?", a: ["Pixar", "Disney", "DreamWorks", "Sony"], correct: 1 },
-  { q: "Bộ phim nào đoạt nhiều Oscar nhất?", a: ["Avatar", "Titanic", "Ben-Hur", "The Lord of the Rings: Return of the King"], correct: 3 },
-  { q: "Ca sĩ nào được mệnh danh là 'Ông hoàng nhạc Pop'?", a: ["Elvis Presley", "Michael Jackson", "Justin Bieber", "Freddie Mercury"], correct: 1 },
+  // === VĂN HÓA – GIẢI TRÍ ===
+  { q: "Nhân vật Luffy thuộc bộ truyện?", a: ["Naruto", "One Piece", "Bleach", "Dragon Ball"], correct: 1 },
+  { q: "Tác giả Harry Potter?", a: ["Tolkien", "J.K. Rowling", "George R.R. Martin", "Suzanne Collins"], correct: 1 },
+  { q: "Hãng tạo ra chuột Mickey?", a: ["Pixar", "Disney", "DreamWorks", "Sony"], correct: 1 },
+  { q: "Bộ phim đoạt 11 Oscar (đồng kỷ lục)?", a: ["Avatar", "Titanic", "Forrest Gump", "La La Land"], correct: 1 },
+  { q: "“Ông hoàng nhạc Pop” là ai?", a: ["Elvis Presley", "Michael Jackson", "Prince", "Freddie Mercury"], correct: 1 },
+  { q: "Tác giả Chúa tể những chiếc nhẫn?", a: ["J.R.R. Tolkien", "C.S. Lewis", "Rowling", "Martin"], correct: 0 },
+  { q: "Quốc gia khai sinh K-pop?", a: ["Nhật Bản", "Trung Quốc", "Hàn Quốc", "Thái Lan"], correct: 2 },
+  { q: "Studio làm series Toy Story?", a: ["Pixar", "Illumination", "DreamWorks", "Blue Sky"], correct: 0 },
+  { q: "Ngôn ngữ trong bộ phim ‘Parasite’?", a: ["Nhật", "Hàn", "Trung", "Anh"], correct: 1 },
+  { q: "Thành viên ban nhạc The Beatles KHÔNG phải ai?", a: ["John Lennon", "Paul McCartney", "Kurt Cobain", "Ringo Starr"], correct: 2 },
 
-  // Công nghệ
-  { q: "Ai là CEO đầu tiên của Microsoft?", a: ["Steve Jobs", "Bill Gates", "Elon Musk", "Jeff Bezos"], correct: 1 },
-  { q: "Ngôn ngữ nào được dùng để tạo ra trang web?", a: ["Python", "HTML", "C++", "Java"], correct: 1 },
-  { q: "Logo hệ điều hành Android là hình con gì?", a: ["Con mèo", "Con robot", "Con ong", "Con khỉ"], correct: 1 },
-  { q: "Google được thành lập vào năm nào?", a: ["1995", "1998", "2001", "2005"], correct: 1 },
-  { q: "Biểu tượng quả táo cắn dở là logo của hãng nào?", a: ["Microsoft", "Samsung", "Apple", "Sony"], correct: 2 },
+  // === CÔNG NGHỆ – KINH TẾ ===
+  { q: "CEO đầu tiên của Microsoft?", a: ["Steve Jobs", "Bill Gates", "Elon Musk", "Jeff Bezos"], correct: 1 },
+  { q: "Ngôn ngữ đánh dấu cho web?", a: ["Python", "HTML", "C++", "Java"], correct: 1 },
+  { q: "Logo Android là hình con gì?", a: ["Mèo", "Robot", "Ong", "Khỉ"], correct: 1 },
+  { q: "Google thành lập năm?", a: ["1995", "1998", "2001", "2005"], correct: 1 },
+  { q: "Logo quả táo cắn dở thuộc hãng?", a: ["Microsoft", "Samsung", "Apple", "Sony"], correct: 2 },
+  { q: "Hệ điều hành mã nguồn mở nổi tiếng?", a: ["Windows", "macOS", "Linux", "iOS"], correct: 2 },
+  { q: "Ngôn ngữ dùng chủ yếu cho Android native?", a: ["Swift", "Kotlin/Java", "C#", "Go"], correct: 1 },
+  { q: "Công nghệ chuỗi khối gọi là?", a: ["ChainLink", "Blockchain", "Data Chain", "Blockdata"], correct: 1 },
+  { q: "Trình duyệt của Google?", a: ["Safari", "Firefox", "Chrome", "Edge"], correct: 2 },
+  { q: "Dịch vụ lưu trữ code lớn nhất?", a: ["GitHub", "Bitbucket", "GitLab", "SourceForge"], correct: 0 },
 
-  // Thể thao
-  { q: "Quốc gia nào vô địch World Cup 2018?", a: ["Đức", "Pháp", "Brazil", "Argentina"], correct: 1 },
-  { q: "Số huy chương vàng Olympic nhiều nhất thuộc về vận động viên nào?", a: ["Usain Bolt", "Michael Phelps", "Larisa Latynina", "Carl Lewis"], correct: 1 },
-  { q: "Bóng đá được cho là bắt nguồn từ quốc gia nào?", a: ["Anh", "Brazil", "Hy Lạp", "Ý"], correct: 0 },
-  { q: "Roger Federer là vận động viên của môn thể thao nào?", a: ["Bóng rổ", "Quần vợt", "Bơi lội", "Bóng đá"], correct: 1 },
+  // === THỂ THAO ===
+  { q: "Vô địch World Cup 2018?", a: ["Đức", "Pháp", "Brazil", "Argentina"], correct: 1 },
+  { q: "VĐV có nhiều HCV Olympic nhất?", a: ["Usain Bolt", "Michael Phelps", "Larisa Latynina", "Carl Lewis"], correct: 1 },
+  { q: "Bóng đá được cho là bắt nguồn từ?", a: ["Anh", "Brazil", "Hy Lạp", "Ý"], correct: 0 },
+  { q: "Roger Federer thi đấu môn?", a: ["Bóng rổ", "Quần vợt", "Bơi lội", "Bóng đá"], correct: 1 },
+  { q: "Sân chơi CLB châu Âu danh giá nhất?", a: ["Europa League", "Champions League", "Conference League", "Super Cup"], correct: 1 },
+  { q: "Số cầu thủ mỗi đội trong bóng đá?", a: ["9", "10", "11", "12"], correct: 2 },
+  { q: "Môn thể thao sử dụng gậy và lỗ cỏ?", a: ["Cricket", "Golf", "Baseball", "Polo"], correct: 1 },
+  { q: "Quốc gia tạo ra sumo?", a: ["Trung Quốc", "Hàn Quốc", "Nhật Bản", "Mông Cổ"], correct: 2 },
+
+  // === VĂN HỌC VIỆT NAM ===
+  { q: "Ai là tác giả Truyện Kiều?", a: ["Nguyễn Du", "Nguyễn Trãi", "Nguyễn Đình Chiểu", "Tố Hữu"], correct: 0 },
+  { q: "“Làng” là tác phẩm của ai?", a: ["Nam Cao", "Kim Lân", "Ngô Tất Tố", "Nguyễn Công Hoan"], correct: 1 },
+  { q: "“Chí Phèo” là nhân vật trong tác phẩm nào?", a: ["Sống mòn", "Lão Hạc", "Chí Phèo", "Tắt đèn"], correct: 2 },
+  { q: "Tác phẩm “Dế Mèn phiêu lưu ký” của ai?", a: ["Ngô Tất Tố", "Tô Hoài", "Nguyễn Nhật Ánh", "Nam Cao"], correct: 1 },
+
+  // === ẨM THỰC ===
+  { q: "Sushi có nguồn gốc từ quốc gia nào?", a: ["Trung Quốc", "Nhật Bản", "Hàn Quốc", "Thái Lan"], correct: 1 },
+  { q: "Phở là món ăn nổi tiếng của quốc gia nào?", a: ["Thái Lan", "Việt Nam", "Trung Quốc", "Lào"], correct: 1 },
+  { q: "Pizza có nguồn gốc từ đâu?", a: ["Pháp", "Ý", "Mỹ", "Anh"], correct: 1 },
+  { q: "Kimchi là món ăn đặc trưng của nước nào?", a: ["Nhật Bản", "Hàn Quốc", "Trung Quốc", "Đài Loan"], correct: 1 },
+
+  // === GAME / ANIME ===
+  { q: "Nhân vật chính của Naruto tên gì?", a: ["Naruto Uzumaki", "Sasuke Uchiha", "Kakashi Hatake", "Itachi Uchiha"], correct: 0 },
+  { q: "Ai là đối thủ chính của Goku trong Dragon Ball Z đầu tiên?", a: ["Frieza", "Cell", "Raditz", "Vegeta"], correct: 3 },
+  { q: "Trong Pokémon, Pikachu thuộc hệ gì?", a: ["Lửa", "Điện", "Nước", "Đá"], correct: 1 },
+  { q: "Hãng game tạo ra Mario?", a: ["Sony", "Nintendo", "Microsoft", "Sega"], correct: 1 },
+  { q: "Liên Minh Huyền Thoại thuộc thể loại game?", a: ["FPS", "MOBA", "RPG", "Sandbox"], correct: 1 },
+
+  // === LOGIC IQ ===
+  { q: "Nếu tất cả A là B, và tất cả B là C, thì A là?", a: ["C", "D", "E", "Không biết"], correct: 0 },
+  { q: "Số tiếp theo của dãy: 2, 4, 8, 16, ?", a: ["18", "20", "24", "32"], correct: 3 },
+  { q: "5 con chim đậu trên cành, bắn rơi 1, còn mấy con?", a: ["4", "0", "3", "5"], correct: 1 },
+  { q: "Hình nào khác nhóm: ⬛, ⚫, 🔺, 🟦", a: ["⬛", "⚫", "🔺", "🟦"], correct: 2 },
 ];
 
 function quizPick() {

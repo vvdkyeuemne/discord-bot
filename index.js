@@ -869,6 +869,10 @@ const commands = [
   .setDescription('Đố vui trắc nghiệm 4 đáp án'), 
 
   new SlashCommandBuilder()
+  .setName('quiztop')
+  .setDescription('Bảng xếp hạng điểm Quiz trong server'),
+
+  new SlashCommandBuilder()
     .setName('coin')
     .setDescription('Ví coin ảo vui vẻ')
     .addSubcommand(s=>s.setName('balance').setDescription('Xem số dư').addUserOption(o=>o.setName('user').setDescription('Người dùng')))
@@ -1911,6 +1915,42 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
     }
   }
 }
+
+// ===== /quiztop handler =====
+if (interaction.isChatInputCommand() && interaction.commandName === 'quiztop') {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  try {
+    await loadQuiz();
+    const gid = interaction.guildId || 'dm';
+    const q = ensureQuizGuild(gid);
+
+    const entries = Object.entries(q.scores || {});
+    if (!entries.length) {
+      return interaction.editReply({ content: 'Chưa có ai có điểm Quiz trong server này.' });
+    }
+
+    // top 10
+    const top = entries.sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const lines = await Promise.all(top.map(async ([uid, pts], i) => {
+      const m = await interaction.guild?.members.fetch(uid).catch(()=>null);
+      const name = m?.displayName || `<@${uid}>`;
+      return `**${i+1}.** ${name} — **${pts}** điểm`;
+    }));
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle('🏆 Bảng xếp hạng Quiz')
+      .setDescription(lines.join('\n'))
+      .setFooter({ text: 'Tính theo tổng số câu đúng (+1 điểm mỗi câu).' })
+      .setTimestamp(new Date());
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (e) {
+    console.error('quiztop error:', e);
+    return interaction.editReply({ content: 'Không lấy được bảng xếp hạng lúc này.' });
+  }
+}
+    
     // ====== /coin ======
     if (interaction.commandName === 'coin') {
       const sub = interaction.options.getSubcommand();
@@ -6949,6 +6989,59 @@ client.on(Events.InteractionCreate, async (itx) => {
   }
 });
 
+// ===== QUIZ SCORE DB =====
+const QUIZ_FILE =
+  process.env.QUIZ_FILE ||
+  (process.platform === 'win32'
+    ? `${process.cwd()}/quiz.json`
+    : '/data/quiz.json');
+
+let QuizDB = { guilds: {} };
+
+function normalizeQuizGuild(g = {}) {
+  return {
+    scores: g.scores && typeof g.scores === 'object' ? g.scores : {}, // uid -> points
+    last:   g.last   && typeof g.last   === 'object' ? g.last   : {}, // uid -> ts (tuỳ ý)
+  };
+}
+
+async function loadQuiz() {
+  const fs = await import('fs/promises');
+  try {
+    const t = await fs.readFile(QUIZ_FILE, 'utf8');
+    QuizDB = JSON.parse(t || '{"guilds":{}}');
+  } catch {
+    QuizDB = { guilds: {} };
+  }
+  for (const gid of Object.keys(QuizDB.guilds || {})) {
+    QuizDB.guilds[gid] = normalizeQuizGuild(QuizDB.guilds[gid]);
+  }
+}
+
+let _quizTimer = null;
+async function saveQuiz() {
+  const fs = await import('fs/promises');
+  if (_quizTimer) clearTimeout(_quizTimer);
+  _quizTimer = setTimeout(async () => {
+    try {
+      await fs.writeFile(QUIZ_FILE, JSON.stringify(QuizDB, null, 2), 'utf8');
+    } catch (_) {}
+  }, 300);
+}
+
+function ensureQuizGuild(gid) {
+  if (!QuizDB.guilds[gid]) QuizDB.guilds[gid] = normalizeQuizGuild({});
+  return QuizDB.guilds[gid];
+}
+
+function addQuizPoint(gid, uid, amount = 1) {
+  const q = ensureQuizGuild(gid);
+  q.scores[uid] = (Number(q.scores[uid]) || 0) + amount;
+  q.last[uid] = Date.now();
+  saveQuiz();
+  return q.scores[uid];
+}
+        
 // ===== Button handler cho /quiz =====
 client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
@@ -6989,13 +7082,20 @@ client.on(Events.InteractionCreate, async (itx) => {
 
   QUIZ_SESS.delete(key);
 
-  try {
-    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
-    if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true, labels) }).catch(() => {});
-  } catch {}
+let totalPts = null;
+try {
+  const gidForScore = itx.guildId || 'dm';
+  await loadQuiz();
+  if (pick === correct) {
+    totalPts = addQuizPoint(gidForScore, itx.user.id, 1);
+  }
+} catch (_) {}
 
-  await itx.followUp({
-    content: pick === correct ? '🎉 Chính xác!' : `❌ Sai. Đáp án đúng là **${['A', 'B', 'C', 'D'][correct]}**.`,
-    ephemeral: true,
-  }).catch(() => {});
-});
+// Chỉnh tin nhắn phản hồi
+await itx.followUp({
+  content:
+    pick === correct
+      ? `🎉 Chính xác! (+1 điểm • Tổng: **${totalPts ?? '—'}**)`
+      : `❌ Sai. Đáp án đúng là **${['A','B','C','D'][correct]}**.`,
+  ephemeral: true
+}).catch(()=>{});

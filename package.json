@@ -22,7 +22,6 @@
     "play-dl": "^1.9.7",
     "prism-media": "^1.3.5",
     "ytdl-core": "^4.11.5",
-    "cheerio": "^1.0.0-rc.12",
-    "@vitalets/google-translate-api": "^9.2.0"
+    "cheerio": "^1.0.0-rc.12"
   }
 }

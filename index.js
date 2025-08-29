@@ -374,20 +374,20 @@ const QUIZ_BANK = [
 function quizPick() {
   // 1/3 xác suất tạo phép tính ngẫu nhiên cho đa dạng
   if (Math.random() < 0.33) {
-    const x = Math.floor(Math.random()*20)+5;
-    const y = Math.floor(Math.random()*12)+3;
-    const z = Math.floor(Math.random()*8)+2;
+    const x = Math.floor(Math.random() * 20) + 5;
+    const y = Math.floor(Math.random() * 12) + 3;
+    const z = Math.floor(Math.random() * 8) + 2;
     const ans = x + y * z;
-    const opts = [ans, ans+2, ans-3, ans+5].sort(()=>Math.random()-0.5);
-    return { q:`${x} + ${y} × ${z} = ?`, a:opts.map(String), ok:opts.indexOf(String(ans)) };
+    const opts = [ans, ans + 2, ans - 3, ans + 5].sort(() => Math.random() - 0.5);
+    return { q: `${x} + ${y} × ${z} = ?`, a: opts.map(String), ok: opts.indexOf(String(ans)) };
   }
-  // còn lại lấy từ bank
-  const item = QUIZ_BANK[Math.floor(Math.random()*QUIZ_BANK.length)];
-  return { q:item.q, a:[...item.a], ok:item.ok };
+
+  // LẤY TỪ BANK: dùng đúng khóa 'correct'
+  const item = QUIZ_BANK[Math.floor(Math.random() * QUIZ_BANK.length)];
+  return { q: item.q, a: [...item.a], ok: item.correct };
 }
 
-function quizRows(gid, uid, nonce, disable=false, labels=[]) {
-  // labels: để hiển thị ✅/❌ sau khi trả lời
+function quizRows(gid, uid, nonce, disable = false, labels = []) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:0`).setStyle(ButtonStyle.Secondary).setLabel(labels[0] || 'A').setDisabled(disable),
     new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:1`).setStyle(ButtonStyle.Secondary).setLabel(labels[1] || 'B').setDisabled(disable),
@@ -396,7 +396,6 @@ function quizRows(gid, uid, nonce, disable=false, labels=[]) {
   );
   return [row];
 }
-
 
 // ------------------- utils
 
@@ -1794,7 +1793,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
 
   try {
     const picked = quizPick();
-    if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4) {
+    if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4 || typeof picked.ok !== 'number') {
       return interaction.editReply({ content: '⚠️ Không thể tạo câu hỏi lúc này.' });
     }
 
@@ -1812,7 +1811,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
         `A. ${picked.a[0]}`,
         `B. ${picked.a[1]}`,
         `C. ${picked.a[2]}`,
-        `D. ${picked.a[3]}`
+        `D. ${picked.a[3]}`,
       ].join('\n'))
       .setFooter({ text: 'Bạn có 30 giây để trả lời.' })
       .setTimestamp(new Date());
@@ -1823,7 +1822,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
     });
 
     QUIZ_SESS.set(key, {
-      correct: picked.ok,
+      correct: picked.ok,          // <-- đã đúng
       msgId: msg.id,
       expiresAt: Date.now() + 30_000,
     });
@@ -1834,8 +1833,8 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
       if (Date.now() >= sess.expiresAt) {
         QUIZ_SESS.delete(key);
         try {
-          const m = await interaction.channel?.messages.fetch(sess.msgId).catch(()=>null);
-          if (m) await m.edit({ components: quizRows(gid, uid, nonce, true) }).catch(()=>{});
+          const m = await interaction.channel?.messages.fetch(sess.msgId).catch(() => null);
+          if (m) await m.edit({ components: quizRows(gid, uid, nonce, true) }).catch(() => {});
         } catch {}
       }
     }, 31_000);
@@ -1843,9 +1842,9 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
   } catch (err) {
     console.error('quiz cmd error:', err);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Có lỗi xảy ra, thử lại nhé.', ephemeral: true }).catch(()=>{});
+      await interaction.reply({ content: 'Có lỗi xảy ra, thử lại nhé.', ephemeral: true }).catch(() => {});
     } else {
-      await interaction.editReply({ content: 'Có lỗi xảy ra, thử lại nhé.' }).catch(()=>{});
+      await interaction.editReply({ content: 'Có lỗi xảy ra, thử lại nhé.' }).catch(() => {});
     }
   }
 }
@@ -6893,33 +6892,33 @@ client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.customId.startsWith('quiz_ans:')) return;
 
   if (!itx.deferred && !itx.replied) {
-    await itx.deferUpdate().catch(()=>{});
+    await itx.deferUpdate().catch(() => {});
   }
 
-  const [ , gid, ownerUid, nonce, idxStr ] = itx.customId.split(':');
+  const [, gid, ownerUid, nonce, idxStr] = itx.customId.split(':');
   const key = `${gid}:${ownerUid}:${nonce}`;
   const sess = QUIZ_SESS.get(key);
 
   if (itx.user.id !== ownerUid) {
-    return itx.followUp({ content: '⛔ Chỉ người mở quiz mới trả lời được.', ephemeral: true }).catch(()=>{});
+    return itx.followUp({ content: '⛔ Chỉ người mở quiz mới trả lời được.', ephemeral: true }).catch(() => {});
   }
 
   if (!sess) {
-    return itx.followUp({ content: '⌛ Câu hỏi đã hết hạn hoặc đã trả lời.', ephemeral: true }).catch(()=>{});
+    return itx.followUp({ content: '⌛ Câu hỏi đã hết hạn hoặc đã trả lời.', ephemeral: true }).catch(() => {});
   }
   if (Date.now() >= sess.expiresAt) {
     QUIZ_SESS.delete(key);
     try {
-      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
-      if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true) }).catch(() => {});
     } catch {}
-    return itx.followUp({ content: '⌛ Hết thời gian trả lời.', ephemeral: true }).catch(()=>{});
+    return itx.followUp({ content: '⌛ Hết thời gian trả lời.', ephemeral: true }).catch(() => {});
   }
 
-  const pick    = Number(idxStr);
+  const pick = Number(idxStr);
   const correct = Number(sess.correct);
 
-  const labels = ['A','B','C','D'].map((t,i) => {
+  const labels = ['A', 'B', 'C', 'D'].map((t, i) => {
     if (i === correct) return `✅ ${t}`;
     if (i === pick && pick !== correct) return `❌ ${t}`;
     return t;
@@ -6928,12 +6927,12 @@ client.on(Events.InteractionCreate, async (itx) => {
   QUIZ_SESS.delete(key);
 
   try {
-    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
-    if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true, labels) }).catch(()=>{});
+    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+    if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true, labels) }).catch(() => {});
   } catch {}
 
   await itx.followUp({
-    content: pick === correct ? '🎉 Chính xác!' : `❌ Sai. Đáp án đúng là **${['A','B','C','D'][correct]}**.`,
-    ephemeral: true
-  }).catch(()=>{});
+    content: pick === correct ? '🎉 Chính xác!' : `❌ Sai. Đáp án đúng là **${['A', 'B', 'C', 'D'][correct]}**.`,
+    ephemeral: true,
+  }).catch(() => {});
 });

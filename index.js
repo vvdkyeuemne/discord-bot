@@ -17,6 +17,7 @@ import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import translate from '@vitalets/google-translate-api';
 
 import {
   Client,

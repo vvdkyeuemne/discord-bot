@@ -320,52 +320,43 @@ function getBal(uid){ return Number(coins[uid] || 0); }
 function addBal(uid, amt){ coins[uid] = getBal(uid) + Number(amt); if (!Number.isFinite(coins[uid])) coins[uid] = 0; saveCoins(); return coins[uid]; }
 function resetWins(gid){ wins[gid] = {}; }
 
-// ===== QUIZ: dữ liệu & tiện ích =====
-const QUIZ_REWARD = 1000;           // coin thưởng cho mỗi câu đúng
-const QUIZ_DURATION_MS = 15000;     // thời gian trả lời (15s)
-const quizCooldown = new Map();     // cooldown theo channel
-const QUIZ_COOLDOWN_MS = 10000;     // 10s chống spam /quiz
-let QUIZ_BANK = [
-  { q: "HTTP 404 là gì?", choices: ["OK","Forbidden","Not Found","Server Error"], ans: 2, exp: "404 = tài nguyên không tồn tại." },
-  { q: "Ngôn ngữ chạy trên Node.js?", choices: ["Python","Java","JavaScript","C#"], ans: 2, exp: "Node.js thực thi JavaScript." },
-  { q: "Thủ đô Nhật Bản?", choices: ["Seoul","Tokyo","Kyoto","Osaka"], ans: 1, exp: "Tokyo." },
+// ===== QUIZ (mini game no-API) =====
+const QUIZ_SESS = new Map(); // key = `${gid}:${uid}:${nonce}` -> { correct, msgId, expiresAt }
+const quizNow = () => Date.now();
+const quizNonce = () => Math.random().toString(36).slice(2) + quizNow().toString(36);
+
+// vài câu hỏi mẫu (bạn muốn có nhiều thì thêm vào đây)
+const QUIZ_BANK = [
+  { q: 'Thủ đô của Nhật Bản là?', a: ['Osaka', 'Kyoto', 'Tokyo', 'Nagoya'], ok: 2 },
+  { q: '2 + 2 × 3 = ?',            a: ['8', '10', '6', '12'],               ok: 0 }, // 2+6=8
+  { q: 'Nguyên tố có ký hiệu Fe?', a: ['Đồng', 'Sắt', 'Bạc', 'Chì'],        ok: 1 },
+  { q: 'Trái Đất quay quanh gì?',  a: ['Mặt Trăng', 'Sao Hỏa', 'Mặt Trời', 'Sao Kim'], ok: 2 },
 ];
 
-async function loadQuizBank() {
-  try {
-    const pathJson = path.join(process.cwd(), 'quiz.json');
-    const exists = await fs.access(pathJson).then(()=>true).catch(()=>false);
-    if (!exists) return;
-    const raw = await fs.readFile(pathJson, 'utf8');
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr) && arr.every(x => x && x.q && Array.isArray(x.choices) && x.choices.length===4 && Number.isInteger(x.ans))) {
-      QUIZ_BANK = arr;
-      console.log(`[QUIZ] Loaded ${arr.length} questions from quiz.json`);
-    } else {
-      console.warn('[QUIZ] quiz.json format invalid. Using built-in samples.');
-    }
-  } catch (e) {
-    console.warn('[QUIZ] Could not load quiz.json:', e?.message || e);
+function quizPick() {
+  // 1/3 xác suất tạo phép tính ngẫu nhiên cho đa dạng
+  if (Math.random() < 0.33) {
+    const x = Math.floor(Math.random()*20)+5;
+    const y = Math.floor(Math.random()*12)+3;
+    const z = Math.floor(Math.random()*8)+2;
+    const ans = x + y * z;
+    const opts = [ans, ans+2, ans-3, ans+5].sort(()=>Math.random()-0.5);
+    return { q:`${x} + ${y} × ${z} = ?`, a:opts.map(String), ok:opts.indexOf(String(ans)) };
   }
+  // còn lại lấy từ bank
+  const item = QUIZ_BANK[Math.floor(Math.random()*QUIZ_BANK.length)];
+  return { q:item.q, a:[...item.a], ok:item.ok };
 }
 
-// trộn mảng
-function shuffle(arr){
-  const a = arr.slice();
-  for(let i=a.length-1;i>0;i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [a[i],a[j]] = [a[j],a[i]];
-  }
-  return a;
-}
-// lấy 1 câu ngẫu nhiên, trộn đáp án nhưng vẫn giữ chỉ mục đúng
-function pickQuiz(){
-  const base = QUIZ_BANK[Math.floor(Math.random()*QUIZ_BANK.length)];
-  const idxs = [0,1,2,3];
-  const shuf = shuffle(idxs);
-  const choices = shuf.map(i => base.choices[i]);
-  const ans = shuf.indexOf(base.ans);
-  return { q: base.q, choices, ans, exp: base.exp };
+function quizRows(gid, uid, nonce, disable=false, labels=[]) {
+  // labels: để hiển thị ✅/❌ sau khi trả lời
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:0`).setStyle(ButtonStyle.Secondary).setLabel(labels[0] || 'A').setDisabled(disable),
+    new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:1`).setStyle(ButtonStyle.Secondary).setLabel(labels[1] || 'B').setDisabled(disable),
+    new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:2`).setStyle(ButtonStyle.Secondary).setLabel(labels[2] || 'C').setDisabled(disable),
+    new ButtonBuilder().setCustomId(`quiz_ans:${gid}:${uid}:${nonce}:3`).setStyle(ButtonStyle.Secondary).setLabel(labels[3] || 'D').setDisabled(disable),
+  );
+  return [row];
 }
 
 
@@ -773,7 +764,9 @@ const commands = [
     .addStringOption(o=>o.setName('to').setDescription('Ngôn ngữ đích (vd: en, vi, ja, ko, zh-CN)').setRequired(false))
     .addStringOption(o=>o.setName('from').setDescription('Ngôn ngữ nguồn (để trống để tự nhận diện)').setRequired(false)),
 
-    new SlashCommandBuilder().setName('quiz').setDescription('Đố vui trắc nghiệm 4 đáp án'),
+   new SlashCommandBuilder()
+  .setName('quiz')
+  .setDescription('Đố vui trắc nghiệm 4 đáp án'), 
 
   new SlashCommandBuilder()
     .setName('coin')
@@ -1528,43 +1521,6 @@ if (typeof addBadge === 'function') {
           .setColor(0x5865F2);
           await interaction.followUp({ embeds:[embed], components:[row] });
           
-      // ===== Quiz: trả lời =====
-if (isBtn && id.startsWith('quiz_ans_')) {
-  const parts = id.split('_');                // ["quiz","ans","<interactionId>","<idx>"]
-  const quizKey = parts[2];
-  const idxStr  = parts[3];
-        if (!global.quizStore) global.quizStore = new Map();
-        const data = global.quizStore.get(quizKey);
-        if (!data) {
-          return interaction.reply({ content: '⏰ Hết thời gian hoặc câu hỏi đã đóng!', ephemeral: true });
-        }
-        if (Date.now() > data.endAt) {
-          global.quizStore.delete(quizKey);
-          return interaction.reply({ content: '⏰ Hết thời gian trả lời!', ephemeral: true });
-        }
-        if (data.chosen.has(interaction.user.id)) {
-          return interaction.reply({ content: '🙅 Bạn đã chọn rồi!', ephemeral: true });
-        }
-
-        data.chosen.add(interaction.user.id);
-
-        const picked = Number(idxStr);
-        const correct = (picked === data.ans);
-
-        let rewardText = '';
-        if (correct) {
-          try {
-            const balAfter = addBal(interaction.user.id, QUIZ_REWARD);
-            rewardText = '\n💰 +' + QUIZ_REWARD.toLocaleString('vi-VN') + ' coin — Số dư: **' + balAfter.toLocaleString('vi-VN') + '**';
-          } catch {}
-        }
-
-        return interaction.reply({
-          ephemeral: true,
-          content: correct
-            ? '✅ Chính xác!' + rewardText + '\nℹ️ ' + (data.exp || '')
-            : '❌ Chưa đúng. Đáp án đúng là **' + ['A','B','C','D'][data.ans] + '**.\nℹ️ ' + (data.exp || '')
-        });
       }
 } catch { await interaction.followUp('⚠️ Lấy meme thất bại.'); }
         return;
@@ -1795,46 +1751,60 @@ const workLeftMs = (acc) => Math.max(0, (Number(acc.lastWork)||0) + WORK_CD - Da
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  try {// ====== /quiz ======
-if (interaction.commandName === 'quiz') {
-  const last = quizCooldown.get(interaction.channelId) || 0;
-  if (Date.now() - last < QUIZ_COOLDOWN_MS) {
-    return interaction.reply({ content: '⏳ Đợi một chút rồi thử lại nhé!', ephemeral: true });
+  // ===== /quiz handler =====
+if (interaction.isChatInputCommand() && interaction.commandName === 'quiz') {
+  await interaction.deferReply({ ephemeral: true }).catch(()=>{});
+
+  // tạo câu hỏi
+  const picked = quizPick();
+  if (!picked || !Array.isArray(picked.a) || picked.a.length !== 4) {
+    return interaction.editReply({ content: '⚠️ Không thể tạo câu hỏi lúc này.' });
   }
-  quizCooldown.set(interaction.channelId, Date.now());
 
-  const quiz = pickQuiz();
-  const labels = ['A','B','C','D'];
+  const gid = interaction.guildId || 'dm';
+  const uid = interaction.user.id;
+  const nonce = quizNonce();
+  const key = `${gid}:${uid}:${nonce}`;
+
   const embed = new EmbedBuilder()
-    .setTitle('🧠 Đố vui trắc nghiệm')
-    .setDescription(`**Câu hỏi:** ${quiz.q}\\n\\n${quiz.choices.map((c,i)=>`**${labels[i]}**. ${c}`).join('\\n')}`)
-    .setColor(0x5865F2)
-    .setFooter({ text: `Bạn có ${(QUIZ_DURATION_MS/1000)} giây để trả lời` });
+    .setColor(0x00bcd4)
+    .setTitle('🧠 Quiz nhanh!')
+    .setDescription([
+      `**Câu hỏi:** ${picked.q}`,
+      '',
+      `A. ${picked.a[0]}`,
+      `B. ${picked.a[1]}`,
+      `C. ${picked.a[2]}`,
+      `D. ${picked.a[3]}`
+    ].join('\n'))
+    .setFooter({ text: 'Bạn có 30 giây để trả lời.' })
+    .setTimestamp(new Date());
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`quiz_ans_${interaction.id}_0`).setLabel('A').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`quiz_ans_${interaction.id}_1`).setLabel('B').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`quiz_ans_${interaction.id}_2`).setLabel('C').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`quiz_ans_${interaction.id}_3`).setLabel('D').setStyle(ButtonStyle.Primary),
-  );
+  const msg = await interaction.editReply({
+    embeds: [embed],
+    components: quizRows(gid, uid, nonce),
+  });
 
-  if (!global.quizStore) global.quizStore = new Map();
-  global.quizStore.set(interaction.id, { ans: quiz.ans, exp: quiz.exp, endAt: Date.now()+QUIZ_DURATION_MS, chosen: new Set() });
+  // lưu session
+  QUIZ_SESS.set(key, {
+    correct: picked.ok,
+    msgId: msg.id,
+    expiresAt: quizNow() + 30_000,
+  });
 
-  const msg = await interaction.reply({ embeds:[embed], components:[row] });
-
+  // auto-expire sau 30s: disable nút nếu chưa trả lời
   setTimeout(async () => {
-    try {
-      const data = global.quizStore.get(interaction.id);
-      if (!data) return;
-      const disabledRow = new ActionRowBuilder().addComponents(
-        row.components.map(b => ButtonBuilder.from(b).setDisabled(true))
-      );
-      await interaction.editReply({ components:[disabledRow] }).catch(()=>{});
-      global.quizStore.delete(interaction.id);
-    } catch {}
-  }, QUIZ_DURATION_MS);
-  return;
+    const sess = QUIZ_SESS.get(key);
+    if (!sess) return;
+    if (quizNow() >= sess.expiresAt) {
+      QUIZ_SESS.delete(key);
+      try {
+        const ch = interaction.channel;
+        const m = await ch?.messages.fetch(sess.msgId).catch(()=>null);
+        if (m) await m.edit({ components: quizRows(gid, uid, nonce, true) }).catch(()=>{});
+      } catch {}
+    }
+  }, 31_000);
 }
 
     // ====== /coin ======
@@ -7096,5 +7066,64 @@ client.on(Events.InteractionCreate, async (itx) => {
         ch.send({ content: `🏆 **${r.boss.name}** đã bị hạ! Xin chúc mừng các dũng sĩ!` }).catch(()=>{});
       }
     }
+  }
+});
+
+// ===== Button handler cho /quiz =====
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  if (!itx.customId.startsWith('quiz_ans:')) return;
+
+  // customId: quiz_ans:<gid>:<uid>:<nonce>:<idx>
+  const [ , gid, ownerUid, nonce, idxStr ] = itx.customId.split(':');
+  const key = `${gid}:${ownerUid}:${nonce}`;
+  const sess = QUIZ_SESS.get(key);
+
+  // luôn ack ngay để tránh "Unknown interaction"
+  if (!itx.deferred && !itx.replied) {
+    await itx.deferUpdate().catch(()=>{});
+  }
+
+  // kiểm tra quyền người trả lời
+  if (itx.user.id !== ownerUid) {
+    return itx.followUp({ content: '⛔ Chỉ người mở quiz mới được trả lời.', ephemeral: true }).catch(()=>{});
+  }
+
+  if (!sess) {
+    return itx.followUp({ content: '⌛ Câu hỏi đã hết hạn hoặc đã trả lời.', ephemeral: true }).catch(()=>{});
+  }
+  if (quizNow() >= sess.expiresAt) {
+    QUIZ_SESS.delete(key);
+    try {
+      const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+      if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+    } catch {}
+    return itx.followUp({ content: '⌛ Hết thời gian trả lời.', ephemeral: true }).catch(()=>{});
+  }
+
+  const pick = Number(idxStr);
+  const correct = Number(sess.correct);
+
+  // hiển thị ✅/❌ trên nút
+  const labels = ['A', 'B', 'C', 'D'].map((t,i) => {
+    if (i === correct) return `✅ ${t}`;
+    if (i === pick && pick !== correct) return `❌ ${t}`;
+    return t;
+  });
+
+  // khóa session
+  QUIZ_SESS.delete(key);
+
+  // disable nút + update label
+  try {
+    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+    if (msg) await msg.edit({ components: quizRows(gid, ownerUid, nonce, true, labels) }).catch(()=>{});
+  } catch {}
+
+  // thông báo kết quả (ephemeral để gọn)
+  if (pick === correct) {
+    await itx.followUp({ content: '🎉 Chính xác! Bạn giỏi đấy.', ephemeral: true }).catch(()=>{});
+  } else {
+    await itx.followUp({ content: `❌ Sai rồi. Đáp án đúng là **${['A','B','C','D'][correct]}**.`, ephemeral: true }).catch(()=>{});
   }
 });

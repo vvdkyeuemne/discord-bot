@@ -2178,7 +2178,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'quiztop') {
 
 // ===== million handler =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'million') {
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  await interaction.deferReply().catch(() => {});
 
   const gid   = interaction.guildId || 'dm';
   const uid   = interaction.user.id;

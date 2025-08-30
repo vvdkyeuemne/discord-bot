@@ -17,7 +17,6 @@ import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import translate from '@vitalets/google-translate-api';
 
 import {
   Client,
@@ -498,19 +497,22 @@ const MILL_BANK = [
 
 // ===== Translate helper (retry + fallback) =====
 async function translateText(text, to = 'vi', tries = 2) {
+  // Khi import namespace, hàm dịch nằm ở gtrans.default (ESM).
+  // fallback sang gtrans nếu môi trường bundle khác.
+  const translateFn = gtrans.default ?? gtrans;
+
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await translate(String(text || ''), { to });
-      const out = (res && res.text) ? String(res.text).trim() : '';
-      // nếu dịch về rỗng thì coi như fail
+      const res = await translateFn(String(text ?? ''), { to });
+      const out = res?.text ? String(res.text).trim() : '';
       if (out) return out;
     } catch (err) {
       lastErr = err;
     }
   }
   if (lastErr) console.error('Translate error:', lastErr);
-  return String(text || '');
+  return String(text ?? ''); // fallback: giữ nguyên nếu dịch lỗi
 }
 
 // Lấy 1 câu hỏi từ OpenTDB (dịch sang Việt)

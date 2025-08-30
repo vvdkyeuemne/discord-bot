@@ -589,6 +589,47 @@ async function millPickQuestion(step) {
   return { q: it.q, a: [...it.a], ok: it.ok, diff: it.diff };
 }
 
+async function millNext(itx, key, { advance = true, forceNew = false } = {}) {
+  const sess = MILL_SESS.get(key);
+  if (!sess) return false;
+
+  // tăng câu nếu trả lời đúng; bỏ qua thì không tăng
+  if (advance) sess.step = (sess.step || 1) + 1;
+
+  // xong 15 câu -> kết thúc
+  if (sess.step > 15) {
+    MILL_SESS.delete(key);
+    try {
+      const m = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+      if (m) await m.edit({ components: [] }).catch(()=>{});
+    } catch {}
+    await itx.followUp({ content: '🏆 Bạn đã hoàn thành 15/15! Quá đỉnh!', ephemeral: true }).catch(()=>{});
+    return true;
+  }
+
+  // advance hoặc forceNew thì rút câu mới
+  if (advance || forceNew) {
+    const q = await millPickQuestion(sess.step);
+    if (!q) return false;
+    sess.q = { q: q.q, ok: q.ok, opts: q.a };
+    sess.disabledIndex = [];       // reset 50:50
+  }
+  sess.startedAt = Date.now();
+  MILL_SESS.set(key, sess);
+
+  // cập nhật message gốc bằng msgId
+  try {
+    const msg = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+    if (msg) {
+      await msg.edit({ embeds: [millEmbed(sess)], components: millRows(sess) }).catch(()=>{});
+    } else if (itx.editReply) {
+      await itx.editReply({ embeds: [millEmbed(sess)], components: millRows(sess) }).catch(()=>{});
+    }
+  } catch {}
+
+  return true;
+}
+
 // UI
 function millEmbed(session) {
   const { step, q, a, used, startedAt } = session;
@@ -7326,150 +7367,126 @@ await itx.followUp({
 }).catch(()=>{});                                     
 });
 
-// ===== button million =====
+// ===== BUTTON HANDLER cho Ai là Triệu Phú =====
 client.on(Events.InteractionCreate, async (itx) => {
   if (!itx.isButton()) return;
 
-  // ===== trả lời A/B/C/D
-  if (itx.customId.startsWith('mil_ans:')) {
+  // ====== TRẢ LỜI A/B/C/D ======
+  if (itx.customId.startsWith('mill_ans:')) {
     const [ , gid, ownerUid, nonce, idxStr ] = itx.customId.split(':');
     if (itx.user.id !== ownerUid) {
       return itx.reply({ content:'⛔ Chỉ người đang chơi mới trả lời được.', ephemeral:true }).catch(()=>{});
     }
     await itx.deferUpdate().catch(()=>{});
 
-    const key = `${gid}:${ownerUid}:${nonce}`;
-    const s = MILL_SESS.get(key);
-    if (!s) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
-    if (millNow() >= s.deadline) {
+    const key  = `${gid}:${ownerUid}:${nonce}`;
+    const sess = MILL_SESS.get(key);
+    if (!sess) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
+
+    if (millNow() >= sess.deadline) {
       MILL_SESS.delete(key);
       try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ components: millRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+        const m = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+        if (m) await m.edit({ components: millRows(sess, true) }).catch(()=>{});
       } catch {}
       return itx.followUp({ content:'⏳ Hết thời gian!', ephemeral:true }).catch(()=>{});
     }
 
     const pick = Number(idxStr);
-    const isCorrect = pick === s.ok;
-
-    if (!isCorrect) {
+    if (pick !== sess.q.ok) {
+      // Sai → kết thúc
       MILL_SESS.delete(key);
-      // Khoá các nút + thông báo
       try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ components: millRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+        const m = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+        if (m) await m.edit({ components: millRows(sess, true) }).catch(()=>{});
       } catch {}
-      const money = MILL_LADDER[Math.max(0, s.step-1)];
+      const money = MILL_LADDER[Math.max(0, (sess.step||1)-1)];
       return itx.followUp({ content:`❌ Sai rồi! Bạn dừng ở **${money.toLocaleString()}**.`, ephemeral:true }).catch(()=>{});
     }
 
-    // Đúng → lên câu tiếp theo
-    s.step += 1;
-    if (s.step > 15) {
-      MILL_SESS.delete(key);
-      try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ components: millRows(gid, ownerUid, nonce, true) }).catch(()=>{});
-      } catch {}
-      const money = MILL_LADDER[15];
-      return itx.followUp({ content:`🎉 Chúc mừng! Bạn đã chinh phục 15/15 — **${money.toLocaleString()}**!`, ephemeral:true }).catch(()=>{});
-    }
-
-    // Lấy câu kế
-    const picked = await millPickQuestion(s.step);
-    s.q = picked.q; s.a = picked.a; s.ok = picked.ok;
-    s.deadline = millNow() + MILL_TIMEOUT;
-
-    // Update UI
-    try {
-      const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-      if (m) await m.edit({ embeds:[millEmbed(s)], components: millRows(gid, ownerUid, nonce) }).catch(()=>{});
-    } catch {}
-
-    // reset timeout watcher (đơn giản: không set lại timer — rely on per-question freshness)
-    return itx.followUp({ content:`✅ Chính xác! Lên câu **${s.step}/15**.`, ephemeral:true }).catch(()=>{});
+    // Đúng → gọi millNext để nhảy câu tiếp
+    await itx.followUp({ content:`✅ Chính xác! Lên câu ${Math.min((sess.step||1)+1, 15)}/15.`, ephemeral:true }).catch(()=>{});
+    return millNext(itx, key, { advance: true });
   }
 
-  // ===== trợ giúp
-  if (itx.customId.startsWith('mil_life:')) {
+  // ====== TRỢ GIÚP ======
+  if (itx.customId.startsWith('mill_life:')) {
     const [ , gid, ownerUid, nonce, kind ] = itx.customId.split(':');
     if (itx.user.id !== ownerUid) {
       return itx.reply({ content:'⛔ Chỉ người đang chơi mới dùng trợ giúp.', ephemeral:true }).catch(()=>{});
     }
     await itx.deferUpdate().catch(()=>{});
 
-    const key = `${gid}:${ownerUid}:${nonce}`;
-    const s = MILL_SESS.get(key);
-    if (!s) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
-    if (millNow() >= s.deadline) {
+    const key  = `${gid}:${ownerUid}:${nonce}`;
+    const sess = MILL_SESS.get(key);
+    if (!sess) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
+
+    if (millNow() >= sess.deadline) {
       MILL_SESS.delete(key);
       try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ components: millRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+        const m = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+        if (m) await m.edit({ components: millRows(sess, true) }).catch(()=>{});
       } catch {}
       return itx.followUp({ content:'⏳ Hết thời gian!', ephemeral:true }).catch(()=>{});
     }
 
+    sess.used = sess.used || {};
+
+    // 50:50
     if (kind === 'fifty') {
-      if (s.used.fifty) return itx.followUp({ content:'Bạn đã dùng 50:50 rồi.', ephemeral:true }).catch(()=>{});
-      s.used.fifty = true;
-      // Ẩn 2 đáp án sai ngẫu nhiên
-      const wrong = [0,1,2,3].filter(i => i !== s.ok);
-      // loại 2
+      if (sess.used.fifty) return itx.followUp({ content:'❌ Bạn đã dùng 50:50 rồi.', ephemeral:true }).catch(()=>{});
+      sess.used.fifty = true;
+      const wrong = [0,1,2,3].filter(i => i !== sess.q.ok);
       while (wrong.length > 2) wrong.splice(Math.floor(Math.random()*wrong.length),1);
-      const hideSet = new Set(wrong);
+      sess.disabledIndex = wrong;
+      MILL_SESS.set(key, sess);
       try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ embeds:[millEmbed(s)], components: millRows(gid, ownerUid, nonce, false, hideSet) }).catch(()=>{});
+        const m = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+        if (m) await m.edit({ embeds:[millEmbed(sess)], components: millRows(sess) }).catch(()=>{});
       } catch {}
-      return itx.followUp({ content:'Đã dùng 50:50.', ephemeral:true }).catch(()=>{});
+      return itx.followUp({ content:'🔎 Đã dùng 50:50.', ephemeral:true }).catch(()=>{});
     }
 
+    // Hỏi khán giả
     if (kind === 'audience') {
-      if (s.used.audience) return itx.followUp({ content:'Bạn đã hỏi khán giả rồi.', ephemeral:true }).catch(()=>{});
-      s.used.audience = true;
-      // Tạo % khán giả vote (ưu tiên đúng)
+      if (sess.used.audience) return itx.followUp({ content:'❌ Bạn đã hỏi khán giả rồi.', ephemeral:true }).catch(()=>{});
+      sess.used.audience = true;
       const base = [10,10,10,10];
-      base[s.ok] += 50 + Math.floor(Math.random()*21); // 50-70% cho đáp án đúng
-      // chuẩn hoá 100%
+      base[sess.q.ok] += 50 + Math.floor(Math.random()*21);
       const sum = base.reduce((a,b)=>a+b,0);
       const pct = base.map(x => Math.round(100*x/sum));
-      return itx.followUp({ content:`👥 Khán giả bình chọn: A:${pct[0]}% • B:${pct[1]}% • C:${pct[2]}% • D:${pct[3]}%`, ephemeral:true }).catch(()=>{});
+      MILL_SESS.set(key, sess);
+      return itx.followUp({ content:`👥 Khán giả bình chọn:\nA:${pct[0]}% • B:${pct[1]}% • C:${pct[2]}% • D:${pct[3]}%`, ephemeral:true }).catch(()=>{});
     }
 
+    // Bỏ qua
     if (kind === 'skip') {
-      if (s.used.skip) return itx.followUp({ content:'Bạn đã dùng bỏ qua rồi.', ephemeral:true }).catch(()=>{});
-      s.used.skip = true;
-      // đổi sang câu khác cùng bậc
-      const picked = await millPickQuestion(s.step);
-      s.q = picked.q; s.a = picked.a; s.ok = picked.ok;
-      s.deadline = millNow() + MILL_TIMEOUT;
-      try {
-        const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-        if (m) await m.edit({ embeds:[millEmbed(s)], components: millRows(gid, ownerUid, nonce) }).catch(()=>{});
-      } catch {}
-      return itx.followUp({ content:'⏭️ Đã đổi sang câu hỏi khác.', ephemeral:true }).catch(()=>{});
+      if (sess.used.skip) return itx.followUp({ content:'❌ Bạn đã dùng Bỏ qua rồi.', ephemeral:true }).catch(()=>{});
+      sess.used.skip = true;
+      MILL_SESS.set(key, sess);
+      await itx.followUp({ content:'⏭️ Đã bỏ qua câu này. Sang câu khác (giữ mức câu).', ephemeral:true }).catch(()=>{});
+      return millNext(itx, key, { advance: false, forceNew: true });
     }
   }
 
-  // ===== dừng cuộc chơi (lấy tiền hiện tại)
-  if (itx.customId.startsWith('mil_stop:')) {
+  // ====== DỪNG CUỘC CHƠI ======
+  if (itx.customId.startsWith('mill_stop:')) {
     const [ , gid, ownerUid, nonce ] = itx.customId.split(':');
     if (itx.user.id !== ownerUid) {
       return itx.reply({ content:'⛔ Chỉ người đang chơi mới dừng cuộc chơi.', ephemeral:true }).catch(()=>{});
     }
     await itx.deferUpdate().catch(()=>{});
 
-    const key = `${gid}:${ownerUid}:${nonce}`;
-    const s = MILL_SESS.get(key);
-    if (!s) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
+    const key  = `${gid}:${ownerUid}:${nonce}`;
+    const sess = MILL_SESS.get(key);
+    if (!sess) return itx.followUp({ content:'Phiên đã kết thúc.', ephemeral:true }).catch(()=>{});
+
     MILL_SESS.delete(key);
     try {
-      const m = await itx.channel?.messages.fetch(s.msgId).catch(()=>null);
-      if (m) await m.edit({ components: millRows(gid, ownerUid, nonce, true) }).catch(()=>{});
+      const m = await itx.channel?.messages.fetch(sess.msgId).catch(()=>null);
+      if (m) await m.edit({ components: millRows(sess, true) }).catch(()=>{});
     } catch {}
-    const money = MILL_LADDER[Math.max(0, s.step-1)];
+    const money = MILL_LADDER[Math.max(0, (sess.step||1)-1)];
     return itx.followUp({ content:`🛑 Bạn chọn dừng ở **${money.toLocaleString()}**.`, ephemeral:true }).catch(()=>{});
   }
 });

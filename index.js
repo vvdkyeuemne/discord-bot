@@ -492,98 +492,30 @@ const MILL_BANK = [
   { q: "Biểu tượng quả táo cắn dở là?", a:["Microsoft","Samsung","Apple","Sony"], ok:2, diff:"easy" },
 ];
 
-// ===== Translate helper (robust for many export styles) =====
-async function translateText(text, to = 'vi', tries = 2) {
-  // Tự phát hiện hàm dịch từ module
-  let translateFn = null;
-  if (typeof gtrans === 'function') translateFn = gtrans;
-  else if (typeof gtrans?.default === 'function') translateFn = gtrans.default;
-  else if (typeof gtrans?.translate === 'function') translateFn = gtrans.translate;
 
-  if (typeof translateFn !== 'function') {
-    console.error('Translate wiring error: cannot find translate function. Keys =', Object.keys(gtrans || {}));
-    return String(text ?? '');
-  }
 
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await translateFn(String(text ?? ''), { to });
-      const out = res?.text ? String(res.text).trim() : '';
-      if (out) return out;
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  if (lastErr) console.error('Translate error:', lastErr);
-  return String(text ?? ''); // fallback: giữ nguyên nếu dịch lỗi
-}
-
-// Lấy 1 câu hỏi từ OpenTDB (dịch sang Việt)
-// ===== OpenTDB (EN -> VI) =====
-async function fetchOpenTDBOne(difficulty = 'easy') {
-  try {
-    const res = await fetch(
-      `https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986&difficulty=${difficulty}`
-    );
-    const data = await res.json();
-    if (!data || data.response_code !== 0 || !data.results?.length) return null;
-
-    const item = data.results[0];
-    const dec = (s = '') => decodeURIComponent(s);
-
-    // EN gốc
-    const qEN   = dec(item.question);
-    const okEN  = dec(item.correct_answer);
-    const ngEN  = (item.incorrect_answers || []).map(dec);
-
-    // Dịch sang VI
-    const [qVI, okVI, ...ngVI] = await Promise.all([
-      translateText(qEN, 'vi'),
-      translateText(okEN, 'vi'),
-      ...ngEN.map(x => translateText(x, 'vi')),
-    ]);
-
-    // Nếu dịch không thay đổi gì (giống EN) -> coi như fail để fallback bank TV
-    const same =
-      qVI === qEN &&
-      okVI === okEN &&
-      ngVI.length === ngEN.length &&
-      ngVI.every((v, i) => v === ngEN[i]);
-
-    if (same) return null;
-
-    // Trộn đáp án
-    const opts = [okVI, ...ngVI].sort(() => Math.random() - 0.5);
-    const okIndex = opts.indexOf(okVI);
-
-    return {
-      q: qVI,
-      a: opts,
-      ok: okIndex,
-      diff: item.difficulty || difficulty,
-    };
-  } catch (err) {
-    console.error('fetchOpenTDBOne error:', err);
-    return null;
-  }
-}
-
-// Chọn câu: ưu tiên API, fail thì dùng bank nội bộ
+// Chọn câu: chỉ dùng bank nội bộ (không API, không dịch)
 async function millPickQuestion(step) {
+  // 1–5: easy, 6–10: medium, 11–15: hard
   const diff = step <= 5 ? 'easy' : step <= 10 ? 'medium' : 'hard';
 
-  const apiQ = await fetchOpenTDBOne(diff);
-  if (apiQ) return apiQ;
+  // Lọc bank theo độ khó
+  const pool = MILL_BANK.filter(x => x.diff === diff);
+  if (!pool.length) {
+    // Nếu lỡ thiếu diff nào, fallback mọi câu trong bank
+    const any = MILL_BANK[Math.floor(Math.random() * MILL_BANK.length)];
+    return { q: any.q, a: [...any.a], ok: any.ok, diff: any.diff || diff };
+  }
 
-  // Fallback bank TV sẵn
-  const pool = MILL_BANK.filter(x =>
-    (diff === 'easy'   && x.diff === 'easy')   ||
-    (diff === 'medium' && x.diff === 'medium') ||
-    (diff === 'hard'   && x.diff === 'hard')
-  );
-  const it = pool[Math.floor(Math.random() * pool.length)];
-  return { q: it.q, a: [...it.a], ok: it.ok, diff: it.diff };
+  // Bốc ngẫu nhiên 1 câu
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+
+  // Trộn thứ tự đáp án nhưng vẫn giữ đúng chỉ số đáp án đúng
+  const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+  const opts = order.map(i => pick.a[i]);
+  const okIndex = order.indexOf(pick.ok);
+
+  return { q: pick.q, a: opts, ok: okIndex, diff };
 }
 
 async function millNext(itx, key, { advance = true, forceNew = false } = {}) {

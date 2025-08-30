@@ -662,16 +662,16 @@ function millEmbed(session) {
 function millRows(gid, uid, nonce, disable=false, hideIdxs=new Set()) {
   const lab = ['A','B','C','D'];
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`mil_ans:${gid}:${uid}:${nonce}:0`).setStyle(ButtonStyle.Secondary).setLabel(lab[0]).setDisabled(disable || hideIdxs.has(0)),
-    new ButtonBuilder().setCustomId(`mil_ans:${gid}:${uid}:${nonce}:1`).setStyle(ButtonStyle.Secondary).setLabel(lab[1]).setDisabled(disable || hideIdxs.has(1)),
-    new ButtonBuilder().setCustomId(`mil_ans:${gid}:${uid}:${nonce}:2`).setStyle(ButtonStyle.Secondary).setLabel(lab[2]).setDisabled(disable || hideIdxs.has(2)),
-    new ButtonBuilder().setCustomId(`mil_ans:${gid}:${uid}:${nonce}:3`).setStyle(ButtonStyle.Secondary).setLabel(lab[3]).setDisabled(disable || hideIdxs.has(3)),
+    new ButtonBuilder().setCustomId(`mill_ans:${gid}:${uid}:${nonce}:0`).setStyle(ButtonStyle.Secondary).setLabel(lab[0]).setDisabled(disable || hideIdxs.has(0)),
+    new ButtonBuilder().setCustomId(`mill_ans:${gid}:${uid}:${nonce}:1`).setStyle(ButtonStyle.Secondary).setLabel(lab[1]).setDisabled(disable || hideIdxs.has(1)),
+    new ButtonBuilder().setCustomId(`mill_ans:${gid}:${uid}:${nonce}:2`).setStyle(ButtonStyle.Secondary).setLabel(lab[2]).setDisabled(disable || hideIdxs.has(2)),
+    new ButtonBuilder().setCustomId(`mill_ans:${gid}:${uid}:${nonce}:3`).setStyle(ButtonStyle.Secondary).setLabel(lab[3]).setDisabled(disable || hideIdxs.has(3)),
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`mil_life:${gid}:${uid}:${nonce}:fifty`).setStyle(ButtonStyle.Primary).setLabel('50:50'),
-    new ButtonBuilder().setCustomId(`mil_life:${gid}:${uid}:${nonce}:audience`).setStyle(ButtonStyle.Primary).setLabel('Hỏi khán giả'),
-    new ButtonBuilder().setCustomId(`mil_life:${gid}:${uid}:${nonce}:skip`).setStyle(ButtonStyle.Primary).setLabel('Bỏ qua'),
-    new ButtonBuilder().setCustomId(`mil_stop:${gid}:${uid}:${nonce}`).setStyle(ButtonStyle.Danger).setLabel('Dừng cuộc chơi')
+    new ButtonBuilder().setCustomId(`mill_life:${gid}:${uid}:${nonce}:fifty`).setStyle(ButtonStyle.Primary).setLabel('50:50'),
+    new ButtonBuilder().setCustomId(`mill_life:${gid}:${uid}:${nonce}:audience`).setStyle(ButtonStyle.Primary).setLabel('Hỏi khán giả'),
+    new ButtonBuilder().setCustomId(`mill_life:${gid}:${uid}:${nonce}:skip`).setStyle(ButtonStyle.Primary).setLabel('Bỏ qua'),
+    new ButtonBuilder().setCustomId(`mill_stop:${gid}:${uid}:${nonce}`).setStyle(ButtonStyle.Danger).setLabel('Dừng cuộc chơi')
   );
   return [row1, row2];
 }

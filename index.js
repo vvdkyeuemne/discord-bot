@@ -473,7 +473,7 @@ const MILL_FILE =
 // ==== Millionaire constants (top-level) ====
 const MILL_LADDER = [0, 200000, 400000, 800000, 1600000, 3200000, 6400000, 12800000, 25600000, 51200000, 102400000, 204800000, 409600000, 819200000, 1000000000];
 const MILL_BANNER_URL = process.env.MILL_BANNER_URL || 'https://sv2.anhsieuviet.com/2025/08/29/latest.png';
-const MILL_TIMEOUT = 30_000;
+const MILL_TIMEOUT = 60_000;
 
 const millNow   = () => Date.now();
 const millNonce = () => Math.random().toString(36).slice(2) + millNow().toString(36);

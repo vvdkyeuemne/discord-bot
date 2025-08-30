@@ -602,14 +602,30 @@ async function millNext(itx, key, { advance = true, forceNew = false } = {}) {
 
   // xong 15 câu -> kết thúc
   if (sess.step > 15) {
-    MILL_SESS.delete(key);
-    try {
-      const m = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
-      if (m) await m.edit({ components: [] }).catch(()=>{});
-    } catch {}
-    await itx.followUp({ content: '🏆 Bạn đã hoàn thành 15/15! Quá đỉnh!', ephemeral: true }).catch(()=>{});
-    return true;
+  MILL_SESS.delete(key);
+  try {
+    const m = await itx.channel?.messages.fetch(sess.msgId).catch(() => null);
+    if (m) await m.edit({ components: [] }).catch(()=>{});
+  } catch {}
+
+  // 🏦 Cộng thưởng vào MBBank
+  const reward = MILL_LADDER[15] || 0; // bậc cuối
+  const credited = mbCredit(itx.user.id, reward);
+  if (credited != null) {
+    await mbSave();
+    await itx.followUp({
+      content: `🏆 Hoàn thành 15/15! 🏦 Thưởng **${reward.toLocaleString()}** đã cộng vào MBBank. Số dư: **${credited.toLocaleString()}**.`,
+      ephemeral: true
+    }).catch(()=>{});
+  } else {
+    await itx.followUp({
+      content: `ℹ️ Bạn chưa có tài khoản MBBank. Dùng \`/mbbank open pin:1234\` để tạo, lần sau thưởng sẽ cộng tự động.`,
+      ephemeral: true
+    }).catch(()=>{});
   }
+
+  return true;
+}
 
   // advance hoặc forceNew thì rút câu mới
   if (advance || forceNew) {
@@ -2347,11 +2363,20 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'million') {
         const m = await interaction.channel?.messages.fetch(s.msgId).catch(() => null);
         if (m) await m.edit({ components: millRows(s, true) }).catch(() => {});
       } catch {}
-      await interaction.followUp({
-        content: `⏳ Hết thời gian! Bạn dừng ở **${(MILL_LADDER[Math.max(0, s.step - 1)] || 0).toLocaleString()}**.`,
-        ephemeral: true
-      }).catch(() => {});
-    }
+      const reward = MILL_LADDER[Math.max(0, s.step - 1)] || 0;
+const credited = mbCredit(interaction.user.id, reward);
+if (credited != null) {
+  await mbSave();
+  await interaction.followUp({
+    content: `⏳ Hết giờ. 🏦 Thưởng **${reward.toLocaleString()}** đã cộng vào MBBank. Số dư: **${credited.toLocaleString()}**.`,
+    ephemeral: true
+  }).catch(()=>{});
+} else {
+  await interaction.followUp({
+    content: `⏳ Hết giờ. ℹ️ Bạn chưa có tài khoản MBBank. Dùng \`/mbbank open pin:1234\`.`,
+    ephemeral: true
+  }).catch(()=>{});
+}
   }, MILL_TIMEOUT + 1000);
 }
 
@@ -7711,6 +7736,18 @@ if (credited != null) {
       if (msg) await msg.edit({ components: [] }).catch(() => {});
     } catch {}
     const money = MILL_LADDER[Math.max(0, (sess.step || 1) - 1)] || 0;
-    return itx.followUp({ content: `🛑 Bạn chọn dừng ở **${money.toLocaleString()}**.`, ephemeral: true }).catch(() => {});
-  }
+    const reward = money;
+const credited = mbCredit(itx.user.id, reward);
+if (credited != null) {
+  await mbSave();
+  await itx.followUp({
+    content: `🏦 Dừng cuộc chơi. Thưởng **${reward.toLocaleString()}** đã cộng vào MBBank. Số dư: **${credited.toLocaleString()}**.`,
+    ephemeral: true
+  }).catch(()=>{});
+} else {
+  await itx.followUp({
+    content: `ℹ️ Bạn chưa có tài khoản MBBank. Dùng \`/mbbank open pin:1234\` để tạo.`,
+    ephemeral: true
+  }).catch(()=>{});
+}
 });

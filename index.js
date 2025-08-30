@@ -687,6 +687,102 @@ function millRows(sess, disabled = false) {
   return [row1, row2];
 }
 
+// ===== MBBank (ảo) =====
+const MB_FILE =
+  process.env.MB_FILE ||
+  (process.platform === 'win32' ? `${process.cwd()}/mbbank.json` : '/data/mbbank.json');
+
+const MB_BANNER_URL =
+  process.env.MB_BANNER_URL ||
+  'https://sv2.anhsieuviet.com/2025/08/30/unnamed.png';
+
+const MBDB = {
+  accounts: {},   // uid -> { uid, accNo, pin, balance, lastUse }
+  accIndex: {}    // accNo -> uid
+};
+
+async function mbLoad() {
+  try {
+    const raw = await fs.readFile(MB_FILE, 'utf8');
+    const obj = JSON.parse(raw);
+    if (obj?.accounts && obj?.accIndex) {
+      MBDB.accounts = obj.accounts;
+      MBDB.accIndex = obj.accIndex;
+    }
+  } catch {}
+}
+async function mbSave() {
+  try {
+    const raw = JSON.stringify(MBDB, null, 2);
+    await fs.mkdir(require('path').dirname(MB_FILE), { recursive: true }).catch(()=>{});
+    await fs.writeFile(MB_FILE, raw, 'utf8');
+  } catch (e) { console.error('mbSave error:', e); }
+}
+await mbLoad();
+
+function genAccNo() {
+  return String(Math.floor(10_0000_00000 + Math.random()*89_9999_99999)); // 11 số
+}
+function maskAcc(accNo = '') {
+  return accNo.replace(/(\d{6})\d+(\d{2})/, (_, a, b) => `${a}${'*'.repeat(Math.max(0, accNo.length-8))}${b}`);
+}
+function checkPin(uid, pin) {
+  const acc = MBDB.accounts[uid];
+  return acc && acc.pin === String(pin);
+}
+
+function mbOpen(uid, pin) {
+  if (MBDB.accounts[uid]) throw new Error('Bạn đã có tài khoản.');
+  if (!/^\d{4}$/.test(String(pin))) throw new Error('PIN phải là 4 chữ số.');
+  const accNo = genAccNo();
+  const acc = { uid, accNo, pin: String(pin), balance: 0, lastUse: Date.now() };
+  MBDB.accounts[uid] = acc;
+  MBDB.accIndex[accNo] = uid;
+  return acc;
+}
+function mbDeposit(uid, amount, pin) {
+  const acc = MBDB.accounts[uid];
+  if (!acc) throw new Error('Chưa có tài khoản.');
+  if (!checkPin(uid, pin)) throw new Error('PIN không đúng.');
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  acc.balance = (acc.balance || 0) + amt;
+  acc.lastUse = Date.now();
+  return acc.balance;
+}
+function mbWithdraw(uid, amount, pin) {
+  const acc = MBDB.accounts[uid];
+  if (!acc) throw new Error('Chưa có tài khoản.');
+  if (!checkPin(uid, pin)) throw new Error('PIN không đúng.');
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if ((acc.balance || 0) < amt) throw new Error('Số dư không đủ.');
+  acc.balance -= amt;
+  acc.lastUse = Date.now();
+  return acc.balance;
+}
+function mbTransfer(fromUid, toAccNo, amount, pin) {
+  const from = MBDB.accounts[fromUid];
+  if (!from) throw new Error('Bạn chưa có tài khoản.');
+  if (!checkPin(fromUid, pin)) throw new Error('PIN không đúng.');
+  const toOwner = MBDB.accIndex[toAccNo];
+  if (!toOwner) throw new Error('Không tìm thấy số tài khoản đích.');
+  const to = MBDB.accounts[toOwner];
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if ((from.balance || 0) < amt) throw new Error('Số dư không đủ.');
+  from.balance -= amt;
+  to.balance = (to.balance || 0) + amt;
+  from.lastUse = to.lastUse = Date.now();
+  return { from: from.balance, to: to.balance, toOwner };
+}
+// cộng thưởng (không cần PIN)
+function mbCredit(uid, amount) {
+  const acc = MBDB.accounts[uid];
+  if (!acc) return null;
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  acc.balance = (acc.balance || 0) + amt;
+  acc.lastUse = Date.now();
+  return acc.balance;
+}
+
 // ------------------- utils
 
 // ====== helpers for Tai Xiu animation ======
@@ -1104,6 +1200,37 @@ new SlashCommandBuilder()
   .setDescription('Chơi Ai là Triệu Phú (15 câu, 3 trợ giúp).'),
 // /milliontop: (tuỳ—nếu muốn làm bảng xếp hạng tiền đạt được, có thể thêm sau)
 
+new SlashCommandBuilder()
+  .setName('mbbank')
+  .setDescription('Ngân hàng MBBank ảo')
+  .addSubcommand(sc =>
+    sc.setName('open')
+      .setDescription('Mở tài khoản mới (PIN 4 số)')
+      .addStringOption(o => o.setName('pin').setDescription('PIN 4 số').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('balance').setDescription('Xem số dư tài khoản')
+  )
+  .addSubcommand(sc =>
+    sc.setName('deposit')
+      .setDescription('Nạp tiền')
+      .addIntegerOption(o => o.setName('amount').setDescription('Số tiền').setRequired(true))
+      .addStringOption(o => o.setName('pin').setDescription('PIN').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('withdraw')
+      .setDescription('Rút tiền')
+      .addIntegerOption(o => o.setName('amount').setDescription('Số tiền').setRequired(true))
+      .addStringOption(o => o.setName('pin').setDescription('PIN').setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName('transfer')
+      .setDescription('Chuyển tiền')
+      .addStringOption(o => o.setName('to').setDescription('Số tài khoản nhận').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Số tiền').setRequired(true))
+      .addStringOption(o => o.setName('pin').setDescription('PIN').setRequired(true))
+  ),
+  
   new SlashCommandBuilder()
     .setName('coin')
     .setDescription('Ví coin ảo vui vẻ')
@@ -2227,6 +2354,97 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'million') {
     }
   }, MILL_TIMEOUT + 1000);
 }
+
+// ===== handler mbbank =====
+if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
+  await interaction.deferReply({ ephemeral: true }).catch(()=>{});
+  const sub = interaction.options.getSubcommand();
+  const uid = interaction.user.id;
+
+  const baseEmbed = (title) =>
+    new EmbedBuilder()
+      .setColor(0x0A5EB7)
+      .setTitle(`🏦 MBBank — ${title}`)
+      .setThumbnail(MB_BANNER_URL)     // logo góc
+      .setImage(MB_BANNER_URL)         // banner app
+      .setTimestamp(new Date());
+
+  try {
+    if (sub === 'open') {
+      const pin = interaction.options.getString('pin', true);
+      const acc = mbOpen(uid, pin);
+      await mbSave();
+      const e = baseEmbed('Mở tài khoản thành công')
+        .setDescription([
+          `**Chủ TK:** <@${uid}>`,
+          `**Số TK:** \`${acc.accNo}\``,
+          `**Số dư:** ${acc.balance.toLocaleString()}`
+        ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+
+    } else if (sub === 'balance') {
+      const acc = MBDB.accounts[uid];
+      if (!acc) return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
+      const e = baseEmbed('Thông tin tài khoản')
+        .setDescription([
+          `**Chủ TK:** <@${uid}>`,
+          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
+          `**Số dư:** ${acc.balance.toLocaleString()}`,
+          `**Cập nhật:** <t:${Math.floor((acc.lastUse||Date.now())/1000)}:R>`
+        ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+
+    } else if (sub === 'deposit') {
+      const amount = interaction.options.getInteger('amount', true);
+      const pin = interaction.options.getString('pin', true);
+      const bal = mbDeposit(uid, amount, pin);
+      await mbSave();
+      const acc = MBDB.accounts[uid];
+      const e = baseEmbed('Nạp tiền thành công')
+        .setDescription([
+          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
+          `**+** ${Number(amount).toLocaleString()}`,
+          `**Số dư mới:** ${bal.toLocaleString()}`
+        ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+
+    } else if (sub === 'withdraw') {
+      const amount = interaction.options.getInteger('amount', true);
+      const pin = interaction.options.getString('pin', true);
+      const bal = mbWithdraw(uid, amount, pin);
+      await mbSave();
+      const acc = MBDB.accounts[uid];
+      const e = baseEmbed('Rút tiền thành công')
+        .setDescription([
+          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
+          `**-** ${Number(amount).toLocaleString()}`,
+          `**Số dư mới:** ${bal.toLocaleString()}`
+        ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+
+    } else if (sub === 'transfer') {
+      const to = interaction.options.getString('to', true);
+      const amount = interaction.options.getInteger('amount', true);
+      const pin = interaction.options.getString('pin', true);
+      const { from, toOwner } = mbTransfer(uid, to, amount, pin);
+      await mbSave();
+      const acc = MBDB.accounts[uid];
+      const e = baseEmbed('Chuyển tiền thành công')
+        .setDescription([
+          `**Từ:** \`${maskAcc(acc.accNo)}\``,
+          `**Đến:** \`${maskAcc(to)}\` (<@${toOwner}>)`,
+          `**Số tiền:** ${Number(amount).toLocaleString()}`,
+          `**Số dư còn lại:** ${from.toLocaleString()}`
+        ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+    }
+
+    return interaction.editReply({ content:'Không rõ subcommand.' });
+
+  } catch (err) {
+    return interaction.editReply({ content:`❌ Lỗi: ${String(err.message || err)}` });
+  }
+}    
     
     // ====== /coin ======
     if (interaction.commandName === 'coin') {
@@ -7404,6 +7622,20 @@ client.on(Events.InteractionCreate, async (itx) => {
         if (msg) await msg.edit({ components: [] }).catch(() => {});
       } catch {}
       const money = MILL_LADDER[Math.max(0, (sess.step || 1) - 1)] || 0;
+      const reward = money;
+const credited = mbCredit(itx.user.id, reward);
+if (credited != null) {
+  await mbSave();
+  await itx.followUp({
+    content: `🏦 Tiền thưởng **${reward.toLocaleString()}** đã cộng vào MBBank. Số dư: **${credited.toLocaleString()}**.`,
+    ephemeral: true
+  }).catch(()=>{});
+} else {
+  await itx.followUp({
+    content: `ℹ️ Bạn chưa có tài khoản MBBank. Dùng \`/mbbank open pin:1234\` để tạo, lần sau thưởng sẽ cộng tự động.`,
+    ephemeral: true
+  }).catch(()=>{});
+}
       return itx.followUp({ content: `❌ Sai rồi! Bạn dừng ở **${money.toLocaleString()}**.`, ephemeral: true }).catch(() => {});
     }
 

@@ -495,11 +495,18 @@ const MILL_BANK = [
   { q: "Biểu tượng quả táo cắn dở là?", a:["Microsoft","Samsung","Apple","Sony"], ok:2, diff:"easy" },
 ];
 
-// ===== Translate helper (retry + fallback) =====
+// ===== Translate helper (robust for many export styles) =====
 async function translateText(text, to = 'vi', tries = 2) {
-  // Khi import namespace, hàm dịch nằm ở gtrans.default (ESM).
-  // fallback sang gtrans nếu môi trường bundle khác.
-  const translateFn = gtrans.default ?? gtrans;
+  // Tự phát hiện hàm dịch từ module
+  let translateFn = null;
+  if (typeof gtrans === 'function') translateFn = gtrans;
+  else if (typeof gtrans?.default === 'function') translateFn = gtrans.default;
+  else if (typeof gtrans?.translate === 'function') translateFn = gtrans.translate;
+
+  if (typeof translateFn !== 'function') {
+    console.error('Translate wiring error: cannot find translate function. Keys =', Object.keys(gtrans || {}));
+    return String(text ?? '');
+  }
 
   let lastErr;
   for (let i = 0; i < tries; i++) {

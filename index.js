@@ -713,7 +713,7 @@ export const MB_BANNER_URL =
 
 const MBDB = {
   accounts: {},   // uid -> { uid, accNo, pin, balance, lastUse }
-  accIndex: {}    // accNo -> uid
+  accIndex: {},    // accNo -> uid
   txs: []
 };
 

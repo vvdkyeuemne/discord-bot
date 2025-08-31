@@ -714,7 +714,20 @@ export const MB_BANNER_URL =
 const MBDB = {
   accounts: {},   // uid -> { uid, accNo, pin, balance, lastUse }
   accIndex: {}    // accNo -> uid
+  txs: []
 };
+
+// ========== LOG GIAO DỊCH ==========
+MBDB.txs = MBDB.txs || [];   // [{ id, type, amount, at, uid, toUid?, note? }]
+let MB_TX_SEQ = 1;
+
+function mbLog(partial) {
+  MBDB.txs.push({
+    id: MB_TX_SEQ++,
+    at: Date.now(),
+    ...partial,
+  });
+    }
 
 // --- Load DB ---
 export async function mbLoad() {
@@ -779,6 +792,7 @@ export function mbDeposit(uid, amount, pin) {
   const amt = Math.max(0, Math.floor(Number(amount) || 0));
   acc.balance = (acc.balance || 0) + amt;
   acc.lastUse = Date.now();
+  mbLog({ type: 'deposit', amount: amt, uid });
   return acc.balance;
 }
 
@@ -790,6 +804,7 @@ export function mbWithdraw(uid, amount, pin) {
   if ((acc.balance || 0) < amt) throw new Error('Số dư không đủ.');
   acc.balance -= amt;
   acc.lastUse = Date.now();
+  mbLog({ type: 'withdraw', amount: amt, uid });
   return acc.balance;
 }
 
@@ -797,25 +812,97 @@ export function mbTransfer(fromUid, toAccNo, amount, pin) {
   const from = MBDB.accounts[fromUid];
   if (!from) throw new Error('Bạn chưa có tài khoản.');
   if (!checkPin(fromUid, pin)) throw new Error('PIN không đúng.');
-  const toUid = MBDB.accIndex[toAccNo];
-  if (!toUid) throw new Error('Không tìm thấy số tài khoản đích.');
-  const to = MBDB.accounts[toUid];
+  const toOwner = MBDB.accIndex[toAccNo];
+  if (!toOwner) throw new Error('Không tìm thấy số tài khoản đích.');
+  const to = MBDB.accounts[toOwner];
   const amt = Math.max(0, Math.floor(Number(amount) || 0));
   if ((from.balance || 0) < amt) throw new Error('Số dư không đủ.');
+
   from.balance -= amt;
   to.balance = (to.balance || 0) + amt;
   from.lastUse = to.lastUse = Date.now();
-  return { from: from.balance, to: to.balance, toOwner: toUid };
+
+  mbLog({ type: 'transfer_out', amount: amt, uid: fromUid, toUid: toOwner });
+  mbLog({ type: 'transfer_in',  amount: amt, uid: toOwner,  toUid: fromUid });
+
+  return { from: from.balance, to: to.balance, toOwner };
 }
 
-// Cộng thưởng (không cần PIN)
+// cộng thưởng (không cần PIN)
 export function mbCredit(uid, amount) {
   const acc = MBDB.accounts[uid];
   if (!acc) return null;
   const amt = Math.max(0, Math.floor(Number(amount) || 0));
   acc.balance = (acc.balance || 0) + amt;
   acc.lastUse = Date.now();
+  mbLog({ type: 'credit', amount: amt, uid, note: 'Thưởng game' });
   return acc.balance;
+}
+
+// ========== UI ==========
+const MB_LOGO_URL = process.env.MB_LOGO_URL || MB_BANNER_URL; // dùng lại banner làm thumbnail
+function fmtVND(n=0) { return Number(n).toLocaleString('vi-VN'); }
+
+/** Thông tin tài khoản; masked=true -> ẩn số TK */
+function mbEmbedAccount(user, masked = true) {
+  const acc = MBDB.accounts[user.id];
+  const accNoShown = masked ? maskAcc(acc?.accNo || '') : (acc?.accNo || '—');
+
+  return new EmbedBuilder()
+    .setColor(0x0047ab)
+    .setTitle('🏛️ MBBank — Thông tin tài khoản')
+    .setThumbnail(MB_LOGO_URL)
+    .setImage(MB_BANNER_URL)
+    .setDescription([
+      `**Chủ TK:** ${user}`,
+      `**Số TK:** \`${accNoShown}\``,
+      `**Số dư:** **${fmtVND(acc?.balance || 0)}**`,
+      `**Cập nhật:** ${acc?.lastUse ? `<t:${Math.floor(acc.lastUse/1000)}:R>` : '—'}`,
+    ].join('\n'));
+}
+
+/** Sao kê gần đây của user */
+function mbEmbedStatement(user, limit = 10) {
+  const uid = user.id;
+  const rows = (MBDB.txs || [])
+    .filter(t => t.uid === uid || t.toUid === uid)
+    .sort((a,b) => b.at - a.at)
+    .slice(0, limit)
+    .map(t => {
+      const when = `<t:${Math.floor(t.at/1000)}:R>`;
+      const money = `**${fmtVND(t.amount)}**`;
+      switch (t.type) {
+        case 'deposit':       return `➕ Nạp ${money} ${when}`;
+        case 'withdraw':      return `➖ Rút ${money} ${when}`;
+        case 'transfer_out':  return `📤 Chuyển ${money} → <@${t.toUid}> ${when}`;
+        case 'transfer_in':   return `📥 Nhận ${money} ← <@${t.toUid}> ${when}`;
+        case 'credit':        return `🏆 Thưởng ${money} (game) ${when}`;
+        default:              return `• ${t.type} ${money} ${when}`;
+      }
+    });
+
+  return new EmbedBuilder()
+    .setColor(0x0066cc)
+    .setTitle('🧾 Sao kê gần đây')
+    .setThumbnail(MB_LOGO_URL)
+    .setDescription(rows.length ? rows.join('\n') : 'Chưa có giao dịch.')
+    .setTimestamp(new Date());
+}
+
+/** Nút: 👁 Hiện số TK (ephemeral) & 🔄 Làm mới sao kê */
+function mbActionRows(user) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mb_showacc:${user.id}`)
+        .setLabel('👁 Hiện số TK')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`mb_stmt:${user.id}`)
+        .setLabel('🔄 Làm mới sao kê')
+        .setStyle(ButtonStyle.Primary),
+    )
+  ];
 }
 
 // ------------------- utils
@@ -1264,7 +1351,12 @@ new SlashCommandBuilder()
       .addStringOption(o => o.setName('to').setDescription('Số tài khoản nhận').setRequired(true))
       .addIntegerOption(o => o.setName('amount').setDescription('Số tiền').setRequired(true))
       .addStringOption(o => o.setName('pin').setDescription('PIN').setRequired(true))
-  ),
+  )
+  .addSubcommand(sc =>
+  sc.setName('statement')
+    .setDescription('Xem sao kê gần đây')
+    .addIntegerOption(o =>
+      o.setName('limit').setDescription('Số dòng (1–25)').setMinValue(1).setMaxValue(25))),
   
   new SlashCommandBuilder()
     .setName('coin')
@@ -2402,7 +2494,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'million') {
 }, MILL_TIMEOUT + 1000);
 }
 
-// ===== handler mbbank =====
+// ===== handler mbbank (đã gộp UI + buttons) =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
   await interaction.deferReply({ ephemeral: true }).catch(()=>{});
   const sub = interaction.options.getSubcommand();
@@ -2412,11 +2504,51 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
     new EmbedBuilder()
       .setColor(0x0A5EB7)
       .setTitle(`🏦 MBBank — ${title}`)
-      .setThumbnail(MB_BANNER_URL)     // logo góc
-      .setImage(MB_BANNER_URL)         // banner app
+      .setThumbnail(MB_BANNER_URL)
+      .setImage(MB_BANNER_URL)
       .setTimestamp(new Date());
 
+  // ——— helpers dựng UI
+  const buildAccountEmbed = (userId, masked = true) => {
+    const acc = MBDB.accounts[userId];
+    return baseEmbed('Thông tin tài khoản').setDescription([
+      `**Chủ TK:** <@${userId}>`,
+      `**Số TK:** \`${masked ? maskAcc(acc.accNo) : acc.accNo}\``,
+      `**Số dư:** ${acc.balance.toLocaleString()}`,
+      `**Cập nhật:** <t:${Math.floor((acc.lastUse||Date.now())/1000)}:R>`
+    ].join('\n'));
+  };
+
+  const buildStatementEmbed = (userId, limit = 10) => {
+    const txs = (MBDB.txs || []).filter(t => t.uid === userId).slice(-limit).reverse();
+    const lines = txs.length
+      ? txs.map(t => {
+          const sign = t.type === 'credit' || t.type === 'deposit' ? '+' :
+                       t.type === 'withdraw' || t.type === 'transfer' ? '−' : '';
+          const toPart = t.toUid ? ` → <@${t.toUid}>` : '';
+          return `• **${t.type.toUpperCase()}** ${sign}${t.amount.toLocaleString()}${toPart} — <t:${Math.floor(t.at/1000)}:R>`;
+        })
+      : ['_Chưa có giao dịch._'];
+    return baseEmbed(`Sao kê gần nhất (${Math.min(Math.max(1, limit), 25)})`)
+      .setDescription(lines.join('\n'));
+  };
+
+  const buildActionRows = (userId, masked = true) => {
+    const rows = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${masked ? 'mb_reveal' : 'mb_hide'}:${userId}`)
+        .setLabel(masked ? 'Hiện STK' : 'Ẩn STK')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`mb_copy:${userId}`)
+        .setLabel('Sao chép STK')
+        .setStyle(ButtonStyle.Primary),
+    );
+    return [rows];
+  };
+
   try {
+    // /mbbank open
     if (sub === 'open') {
       const pin = interaction.options.getString('pin', true);
       const acc = mbOpen(uid, pin);
@@ -2428,64 +2560,84 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
           `**Số dư:** ${acc.balance.toLocaleString()}`
         ].join('\n'));
       return interaction.editReply({ embeds: [e] });
+    }
 
-    } else if (sub === 'balance') {
+    // /mbbank balance
+    if (sub === 'balance') {
       const acc = MBDB.accounts[uid];
-      if (!acc) return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
-      const e = baseEmbed('Thông tin tài khoản')
-        .setDescription([
-          `**Chủ TK:** <@${uid}>`,
-          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
-          `**Số dư:** ${acc.balance.toLocaleString()}`,
-          `**Cập nhật:** <t:${Math.floor((acc.lastUse||Date.now())/1000)}:R>`
-        ].join('\n'));
-      return interaction.editReply({ embeds: [e] });
+      if (!acc) {
+        return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
+      }
+      const e = buildAccountEmbed(uid, /*masked*/ true);
+      return interaction.editReply({
+        embeds: [e],
+        components: buildActionRows(uid, /*masked*/ true)
+      });
+    }
 
-    } else if (sub === 'deposit') {
+    // /mbbank statement [limit]
+    if (sub === 'statement') {
+      const acc = MBDB.accounts[uid];
+      if (!acc) {
+        return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
+      }
+      const limit = interaction.options.getInteger('limit') ?? 10;
+      const e1 = buildAccountEmbed(uid, /*masked*/ true);
+      const e2 = buildStatementEmbed(uid, Math.max(1, Math.min(25, limit)));
+      return interaction.editReply({
+        embeds: [e1, e2],
+        components: buildActionRows(uid, /*masked*/ true)
+      });
+    }
+
+    // /mbbank deposit
+    if (sub === 'deposit') {
       const amount = interaction.options.getInteger('amount', true);
       const pin = interaction.options.getString('pin', true);
       const bal = mbDeposit(uid, amount, pin);
       await mbSave();
       const acc = MBDB.accounts[uid];
-      const e = baseEmbed('Nạp tiền thành công')
-        .setDescription([
-          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
-          `**+** ${Number(amount).toLocaleString()}`,
-          `**Số dư mới:** ${bal.toLocaleString()}`
-        ].join('\n'));
+      const e = baseEmbed('Nạp tiền thành công').setDescription([
+        `**Số TK:** \`${maskAcc(acc.accNo)}\``,
+        `**+** ${Number(amount).toLocaleString()}`,
+        `**Số dư mới:** ${bal.toLocaleString()}`
+      ].join('\n'));
       return interaction.editReply({ embeds: [e] });
+    }
 
-    } else if (sub === 'withdraw') {
+    // /mbbank withdraw
+    if (sub === 'withdraw') {
       const amount = interaction.options.getInteger('amount', true);
       const pin = interaction.options.getString('pin', true);
       const bal = mbWithdraw(uid, amount, pin);
       await mbSave();
       const acc = MBDB.accounts[uid];
-      const e = baseEmbed('Rút tiền thành công')
-        .setDescription([
-          `**Số TK:** \`${maskAcc(acc.accNo)}\``,
-          `**-** ${Number(amount).toLocaleString()}`,
-          `**Số dư mới:** ${bal.toLocaleString()}`
-        ].join('\n'));
+      const e = baseEmbed('Rút tiền thành công').setDescription([
+        `**Số TK:** \`${maskAcc(acc.accNo)}\``,
+        `**-** ${Number(amount).toLocaleString()}`,
+        `**Số dư mới:** ${bal.toLocaleString()}`
+      ].join('\n'));
       return interaction.editReply({ embeds: [e] });
+    }
 
-    } else if (sub === 'transfer') {
+    // /mbbank transfer
+    if (sub === 'transfer') {
       const to = interaction.options.getString('to', true);
       const amount = interaction.options.getInteger('amount', true);
       const pin = interaction.options.getString('pin', true);
       const { from, toOwner } = mbTransfer(uid, to, amount, pin);
       await mbSave();
       const acc = MBDB.accounts[uid];
-      const e = baseEmbed('Chuyển tiền thành công')
-        .setDescription([
-          `**Từ:** \`${maskAcc(acc.accNo)}\``,
-          `**Đến:** \`${maskAcc(to)}\` (<@${toOwner}>)`,
-          `**Số tiền:** ${Number(amount).toLocaleString()}`,
-          `**Số dư còn lại:** ${from.toLocaleString()}`
-        ].join('\n'));
+      const e = baseEmbed('Chuyển tiền thành công').setDescription([
+        `**Từ:** \`${maskAcc(acc.accNo)}\``,
+        `**Đến:** \`${maskAcc(to)}\` (<@${toOwner}>)`,
+        `**Số tiền:** ${Number(amount).toLocaleString()}`,
+        `**Số dư còn lại:** ${from.toLocaleString()}`
+      ].join('\n'));
       return interaction.editReply({ embeds: [e] });
     }
 
+    // không khớp sub
     return interaction.editReply({ content:'Không rõ subcommand.' });
 
   } catch (err) {
@@ -7775,4 +7927,75 @@ if (credited != null) {
 }
 return;
 }
+});
+
+// ===== Buttons: MBBank (Ẩn/Hiện STK, Sao chép) =====
+client.on(Events.InteractionCreate, async (itx) => {
+  if (!itx.isButton()) return;
+  const [action, ownerId] = itx.customId.split(':');
+
+  if (!['mb_reveal','mb_hide','mb_copy'].includes(action)) return;
+
+  // chỉ chủ tài khoản mới bấm
+  if (itx.user.id !== ownerId) {
+    return itx.reply({ content:'⛔ Chỉ chủ tài khoản mới dùng nút này.', ephemeral:true }).catch(()=>{});
+  }
+  const acc = MBDB.accounts[ownerId];
+  if (!acc) {
+    return itx.reply({ content:'❗ Không tìm thấy tài khoản.', ephemeral:true }).catch(()=>{});
+  }
+
+  // helper: dựng embed + rows (trùng logic với handler trên)
+  const baseEmbedBtn = (title) =>
+    new EmbedBuilder()
+      .setColor(0x0A5EB7)
+      .setTitle(`🏦 MBBank — ${title}`)
+      .setThumbnail(MB_BANNER_URL)
+      .setImage(MB_BANNER_URL)
+      .setTimestamp(new Date());
+
+  const buildAccountEmbedBtn = (masked) =>
+    baseEmbedBtn('Thông tin tài khoản').setDescription([
+      `**Chủ TK:** <@${ownerId}>`,
+      `**Số TK:** \`${masked ? maskAcc(acc.accNo) : acc.accNo}\``,
+      `**Số dư:** ${acc.balance.toLocaleString()}`,
+      `**Cập nhật:** <t:${Math.floor((acc.lastUse||Date.now())/1000)}:R>`
+    ].join('\n'));
+
+  const buildRowsBtn = (masked) => [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${masked ? 'mb_reveal' : 'mb_hide'}:${ownerId}`)
+        .setLabel(masked ? 'Hiện STK' : 'Ẩn STK')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`mb_copy:${ownerId}`)
+        .setLabel('Sao chép STK')
+        .setStyle(ButtonStyle.Primary),
+    )
+  ];
+
+  // xử lý
+  if (action === 'mb_copy') {
+    return itx.reply({
+      content: `📋 Đã sao chép: \`${acc.accNo}\``,
+      ephemeral: true
+    }).catch(()=>{});
+  }
+
+  // mb_reveal / mb_hide -> cập nhật message hiện tại
+  const masked = action === 'mb_hide' ? true : false;
+  await itx.deferUpdate().catch(()=>{});
+
+  try {
+    const msg = itx.message; // chính message đang chứa embed
+    const newFirst = buildAccountEmbedBtn(masked);
+    const rest = Array.isArray(msg.embeds) && msg.embeds.length > 1
+      ? msg.embeds.slice(1).map(e => EmbedBuilder.from(e))
+      : [];
+    await msg.edit({
+      embeds: [newFirst, ...rest],
+      components: buildRowsBtn(masked)
+    }).catch(()=>{});
+  } catch {}
 });

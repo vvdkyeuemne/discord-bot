@@ -2682,7 +2682,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
 
     // /mbbank withdraw
     if (sub === 'withdraw') {
-      const amount = interaction.options.getInteger('amount, true);
+      const amount = interaction.options.getInteger('amount', true);
       const pin = interaction.options.getString('pin', true);
       const bal = mbWithdraw(uid, amount, pin);
       await mbSave();

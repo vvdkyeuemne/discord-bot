@@ -1427,7 +1427,7 @@ new SlashCommandBuilder()
   sc.setName('statement')
     .setDescription('Xem sao kê gần đây')
     .addIntegerOption(o =>
-      o.setName('limit').setDescription('Số dòng (1–25)').setMinValue(1).setMaxValue(25))),
+      o.setName('limit').setDescription('Số dòng (1–25)').setMinValue(1).setMaxValue(25)))
 
  .addSubcommand(sc =>
   sc.setName('viplist')

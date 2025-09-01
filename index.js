@@ -729,6 +729,41 @@ function mbLog(partial) {
   });
     }
 
+// ===== DANH SÁCH SỐ TÀI KHOẢN VIP =====
+const MB_VIP_NUMBERS = [
+  // Dãy số tiến
+  { accNo: "123456789",   price: 5_000_000 },
+  { accNo: "1234567890",  price: 6_000_000 },
+
+  // Dãy số lặp
+  { accNo: "1111111111",  price: 7_000_000 },
+  { accNo: "2222222222",  price: 7_000_000 },
+  { accNo: "3333333333",  price: 7_000_000 },
+  { accNo: "9999999999",  price: 10_000_000 },
+
+  // Dãy số gánh
+  { accNo: "6868686868",  price: 8_000_000 },
+  { accNo: "8686868686",  price: 8_000_000 },
+
+  // Tứ quý / ngũ quý
+  { accNo: "88888888",    price: 9_000_000 },
+  { accNo: "77777777",    price: 9_000_000 },
+  { accNo: "5555555555",  price: 15_000_000 },
+  { accNo: "6666666666",  price: 15_000_000 },
+
+  // Thần tài / lộc phát / đặc biệt
+  { accNo: "6868686886",  price: 12_000_000 },
+  { accNo: "3939393939",  price: 12_000_000 },
+  { accNo: "7979797979",  price: 12_000_000 },
+  { accNo: "12344321",    price: 6_500_000 },
+  { accNo: "1212121212",  price: 7_500_000 },
+  { accNo: "9090909090",  price: 7_500_000 },
+
+  // Siêu hiếm
+  { accNo: "88888888888", price: 20_000_000 },
+  { accNo: "99999999999", price: 25_000_000 },
+];
+
 // --- Load DB ---
 export async function mbLoad() {
   try {
@@ -826,6 +861,42 @@ export function mbTransfer(fromUid, toAccNo, amount, pin) {
   mbLog({ type: 'transfer_in',  amount: amt, uid: toOwner,  toUid: fromUid });
 
   return { from: from.balance, to: to.balance, toOwner };
+}
+
+export function mbGetVip(accNo) {
+  return MB_VIP_NUMBERS.find(v => v.accNo === String(accNo));
+}
+
+/**
+ * Mua số tài khoản VIP — yêu cầu:
+ * - ĐÃ có tài khoản MBBank
+ * - Đúng PIN
+ * - Số VIP chưa bị người khác mua
+ * - Đủ số dư
+ * => Trừ tiền, đổi số tài khoản, cập nhật index
+ */
+export function mbBuyVip(uid, accNo, pin) {
+  const acc = MBDB.accounts[uid];
+  if (!acc) throw new Error('Bạn chưa có tài khoản. Dùng /mbbank open trước.');
+  if (!/^\d{4}$/.test(String(pin))) throw new Error('PIN phải là 4 chữ số.');
+  if (!checkPin(uid, pin)) throw new Error('PIN không đúng.');
+
+  const vip = mbGetVip(accNo);
+  if (!vip) throw new Error('Số VIP không nằm trong danh sách.');
+  if (MBDB.accIndex[vip.accNo]) throw new Error('Số VIP này đã có người sở hữu.');
+  if ((acc.balance || 0) < vip.price) throw new Error('Số dư không đủ để mua số VIP.');
+
+  // trừ tiền & đổi số
+  acc.balance -= vip.price;
+  const oldNo = acc.accNo;
+
+  // cập nhật index
+  if (oldNo && MBDB.accIndex[oldNo]) delete MBDB.accIndex[oldNo];
+  acc.accNo = vip.accNo;
+  MBDB.accIndex[acc.accNo] = uid;
+
+  acc.lastUse = Date.now();
+  return { oldNo, newNo: acc.accNo, balance: acc.balance, price: vip.price };
 }
 
 // cộng thưởng (không cần PIN)
@@ -1357,6 +1428,20 @@ new SlashCommandBuilder()
     .setDescription('Xem sao kê gần đây')
     .addIntegerOption(o =>
       o.setName('limit').setDescription('Số dòng (1–25)').setMinValue(1).setMaxValue(25))),
+
+ .addSubcommand(sc =>
+  sc.setName('viplist')
+    .setDescription('Xem danh sách số tài khoản VIP (có/không còn hàng)')
+    .addIntegerOption(o =>
+      o.setName('page').setDescription('Trang (mặc định 1)').setMinValue(1)
+    )
+)
+ .addSubcommand(sc =>
+  sc.setName('buyvip')
+    .setDescription('Mua số tài khoản VIP')
+    .addStringOption(o => o.setName('accno').setDescription('Số tài khoản VIP muốn mua').setRequired(true))
+    .addStringOption(o => o.setName('pin').setDescription('PIN 4 số').setRequired(true))
+),
   
   new SlashCommandBuilder()
     .setName('coin')
@@ -2494,7 +2579,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'million') {
 }, MILL_TIMEOUT + 1000);
 }
 
-// ===== handler mbbank (đã gộp UI + buttons) =====
+// ===== handler mbbank (đã gộp UI + buttons + vip) =====
 if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
   await interaction.deferReply({ ephemeral: true }).catch(()=>{});
   const sub = interaction.options.getSubcommand();
@@ -2534,7 +2619,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
   };
 
   const buildActionRows = (userId, masked = true) => {
-    const rows = new ActionRowBuilder().addComponents(
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`${masked ? 'mb_reveal' : 'mb_hide'}:${userId}`)
         .setLabel(masked ? 'Hiện STK' : 'Ẩn STK')
@@ -2544,7 +2629,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
         .setLabel('Sao chép STK')
         .setStyle(ButtonStyle.Primary),
     );
-    return [rows];
+    return [row];
   };
 
   try {
@@ -2565,29 +2650,19 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
     // /mbbank balance
     if (sub === 'balance') {
       const acc = MBDB.accounts[uid];
-      if (!acc) {
-        return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
-      }
-      const e = buildAccountEmbed(uid, /*masked*/ true);
-      return interaction.editReply({
-        embeds: [e],
-        components: buildActionRows(uid, /*masked*/ true)
-      });
+      if (!acc) return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
+      const e = buildAccountEmbed(uid, true);
+      return interaction.editReply({ embeds: [e], components: buildActionRows(uid, true) });
     }
 
     // /mbbank statement [limit]
     if (sub === 'statement') {
       const acc = MBDB.accounts[uid];
-      if (!acc) {
-        return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
-      }
+      if (!acc) return interaction.editReply({ content:'❗ Bạn chưa có tài khoản. Dùng `/mbbank open pin:1234` để tạo.' });
       const limit = interaction.options.getInteger('limit') ?? 10;
-      const e1 = buildAccountEmbed(uid, /*masked*/ true);
+      const e1 = buildAccountEmbed(uid, true);
       const e2 = buildStatementEmbed(uid, Math.max(1, Math.min(25, limit)));
-      return interaction.editReply({
-        embeds: [e1, e2],
-        components: buildActionRows(uid, /*masked*/ true)
-      });
+      return interaction.editReply({ embeds: [e1, e2], components: buildActionRows(uid, true) });
     }
 
     // /mbbank deposit
@@ -2607,7 +2682,7 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
 
     // /mbbank withdraw
     if (sub === 'withdraw') {
-      const amount = interaction.options.getInteger('amount', true);
+      const amount = interaction.options.getInteger('amount, true);
       const pin = interaction.options.getString('pin', true);
       const bal = mbWithdraw(uid, amount, pin);
       await mbSave();
@@ -2637,11 +2712,49 @@ if (interaction.isChatInputCommand() && interaction.commandName === 'mbbank') {
       return interaction.editReply({ embeds: [e] });
     }
 
+    // /mbbank viplist [page]
+    if (sub === 'viplist') {
+      const page = Math.max(1, Math.min(50, interaction.options.getInteger('page') || 1));
+      const per = 10;
+      const total = Math.max(1, Math.ceil(MB_VIP_NUMBERS.length / per));
+      const p = Math.min(page, total);
+      const slice = MB_VIP_NUMBERS.slice((p-1)*per, p*per);
+
+      const lines = slice.map(v => {
+        const taken = !!MBDB.accIndex[v.accNo];
+        return `\`${v.accNo}\` — ${v.price.toLocaleString()} đ ${taken ? '❌ (Đã bán)' : '✅ (Còn)'}`;
+      }).join('\n') || '_Không có dữ liệu_';
+
+      const e = baseEmbed('Danh sách số tài khoản VIP')
+        .setDescription(lines)
+        .setFooter({ text: `Trang ${p}/${total} • Dùng /mbbank buyvip accno:<số> pin:<pin>` });
+
+      return interaction.editReply({ embeds: [e] });
+    }
+
+    // /mbbank buyvip accno:<string> pin:<string>
+    if (sub === 'buyvip') {
+      const accno = interaction.options.getString('accno', true).trim();
+      const pin   = interaction.options.getString('pin', true).trim();
+
+      const { oldNo, newNo, balance, price } = mbBuyVip(uid, accno, pin);
+      await mbSave();
+
+      const e = baseEmbed('Mua số tài khoản VIP thành công').setDescription([
+        `**Chủ TK:** <@${uid}>`,
+        `**Số cũ:** \`${oldNo ? maskAcc(oldNo) : '—'}\``,
+        `**Số mới (VIP):** \`${newNo}\``,
+        `**Giá mua:** ${price.toLocaleString()} đ`,
+        `**Số dư còn lại:** ${balance.toLocaleString()} đ`,
+      ].join('\n'));
+      return interaction.editReply({ embeds: [e] });
+    }
+
     // không khớp sub
-    return interaction.editReply({ content:'Không rõ subcommand.' });
+    return interaction.editReply({ content: 'Không rõ subcommand.' });
 
   } catch (err) {
-    return interaction.editReply({ content:`❌ Lỗi: ${String(err.message || err)}` });
+    return interaction.editReply({ content: `❌ Lỗi: ${String(err.message || err)}` });
   }
 }    
     
